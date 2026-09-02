@@ -77,8 +77,6 @@ module.exports = async (req, res) => {
       transaction_amount: payment.transaction_amount
     });
 
-    // En esta etapa registramos el evento de forma segura en los logs de Vercel.
-    // Luego podemos conectar este punto con una base de datos, email o WhatsApp.
     return res.status(200).json({
       received: true,
       payment_id: payment.id,
