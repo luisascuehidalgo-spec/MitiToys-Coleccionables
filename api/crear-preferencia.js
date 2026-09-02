@@ -59,13 +59,17 @@ module.exports = async (req, res) => {
     `;
 
     const customerId = customerRows[0].id;
+    const temporaryReference = `MITITOYS-PENDING-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const orderRows = await sql`
       INSERT INTO orders (order_number, customer_id, product_id, product_title, quantity, unit_price, total_amount, external_reference)
-      VALUES ('MT-' || TO_CHAR(NOW(), 'YYYYMMDDHH24MISSMS') || '-' || LPAD(nextval('orders_id_seq')::text, 5, '0'), ${customerId}, ${product.id}, ${product.title}, 1, ${product.price}, ${product.price}, 'MITITOYS-PENDING-' || gen_random_uuid()::text)
-      RETURNING id, order_number, external_reference
+      VALUES ('MT-' || TO_CHAR(NOW(), 'YYYYMMDDHH24MISSMS') || '-' || SUBSTRING(MD5(RANDOM()::text), 1, 6), ${customerId}, ${product.id}, ${product.title}, 1, ${product.price}, ${product.price}, ${temporaryReference})
+      RETURNING id, order_number
     `;
 
     const order = orderRows[0];
+    const externalReference = `MITITOYS-ORDER-${order.id}`;
+    await sql`UPDATE orders SET external_reference=${externalReference} WHERE id=${order.id}`;
+
     const origin = req.headers.origin || 'https://otaku-collectibles.vercel.app';
     const preference = {
       items: [{
@@ -78,7 +82,7 @@ module.exports = async (req, res) => {
         unit_price: product.price
       }],
       payer: { name: customer.name, email: customer.email },
-      external_reference: `MITITOYS-ORDER-${order.id}`,
+      external_reference: externalReference,
       back_urls: {
         success: `${origin}/?pago=exitoso&pedido=${encodeURIComponent(order.order_number)}`,
         pending: `${origin}/?pago=pendiente&pedido=${encodeURIComponent(order.order_number)}`,
