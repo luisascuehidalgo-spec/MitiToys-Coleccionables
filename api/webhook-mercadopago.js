@@ -50,6 +50,13 @@ module.exports = async (req, res) => {
       return res.status(401).json({ error: "Firma de Webhook inválida o clave no configurada." });
     }
 
+    // Mercado Pago usa datos ficticios al ejecutar "Simular notificación".
+    // Respondemos OK para que la simulación valide la recepción sin consultar
+    // ese ID inexistente en la API de pagos.
+    if (body?.live_mode === false) {
+      return res.status(200).json({ received: true, simulated: true });
+    }
+
     const token = process.env.MERCADOPAGO_ACCESS_TOKEN;
     if (!token) {
       console.error("Falta MERCADOPAGO_ACCESS_TOKEN");
