@@ -1,0 +1,2 @@
+const { getDb } = require('../lib/db');
+module.exports = async (req,res)=>{if(req.method!=='GET')return res.status(405).json({error:'Método no permitido'});try{const sql=getDb();const rows=await sql`SELECT NOW() AS server_time`;return res.status(200).json({ok:true,database:true,server_time:rows[0].server_time});}catch(error){console.error('health error:',error);return res.status(500).json({ok:false,database:false,error:'Base de datos no configurada o no disponible.'});}};
