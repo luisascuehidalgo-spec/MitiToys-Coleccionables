@@ -4,7 +4,6 @@ const PRODUCTOS = {
   "3377": { id: "3377", title: "Figura Luffy Gear 5 – Nika – One Piece – 31 cm", description: "Figura coleccionable de Monkey D. Luffy Gear 5 / Nika, One Piece. 31 cm aprox., PVC, incluye figura + caja.", price: 150000, picture_url: "https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/20241123034449_1.jpg" },
   "3375": { id: "3375", title: "Figura One Piece Kaido Dragón 30 Cm PVC Coleccionable Anime", description: "Estatua coleccionable de Kaido con dragón azul. 30 cm aprox. de altura, 37 cm aprox. de ancho, PVC.", price: 300000, picture_url: "https://raw.githubusercontent.com/luisascuehidalgo-spec/COD-3375/main/D_NQ_NP_2X_758000-MLA115602430906_092026-F.webp" }
 };
-
 const clean = (v, max=200) => String(v || '').trim().slice(0,max);
 
 module.exports = async (req, res) => {
@@ -21,8 +20,6 @@ module.exports = async (req, res) => {
     let orderNumber = null;
     let orderId = null;
 
-    // Cuando la base está configurada, creamos el pedido antes de abrir Checkout Pro.
-    // Si todavía no está configurada, mantenemos el flujo anterior para no interrumpir las ventas.
     if (process.env.DATABASE_URL) {
       const sql = getDb();
       const c = body.customer || {};
@@ -36,9 +33,10 @@ module.exports = async (req, res) => {
           RETURNING id`;
         customerId = rows[0].id;
       }
+      const tempRef = `MITITOYS-PENDING-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
       const orderRows = await sql`
         INSERT INTO orders (order_number,customer_id,product_id,product_title,quantity,unit_price,total_amount,external_reference)
-        VALUES ('MT-' || TO_CHAR(NOW(),'YYYYMMDDHH24MISSMS') || '-' || SUBSTRING(MD5(RANDOM()::text),1,6),${customerId},${product.id},${product.title},1,${product.price},${product.price},${`MITITOYS-PENDING-${Date.now()}-${Math.random().toString(36).slice(2,8)}`})
+        VALUES ('MT-' || TO_CHAR(NOW(),'YYYYMMDDHH24MISSMS') || '-' || SUBSTRING(MD5(RANDOM()::text),1,6),${customerId},${product.id},${product.title},1,${product.price},${product.price},${tempRef})
         RETURNING id,order_number`;
       orderId = orderRows[0].id;
       orderNumber = orderRows[0].order_number;
@@ -64,7 +62,10 @@ module.exports = async (req, res) => {
     });
     const data = await response.json();
     if (!response.ok) {
-      if (orderId && process.env.DATABASE_URL) await getDb()`UPDATE orders SET status='cancelled' WHERE id=${orderId}`;
+      if (orderId && process.env.DATABASE_URL) {
+        const sql = getDb();
+        await sql`UPDATE orders SET status='cancelled' WHERE id=${orderId}`;
+      }
       console.error('Mercado Pago error:', data);
       return res.status(response.status).json({ error: 'Mercado Pago rechazó la creación del pago.' });
     }
