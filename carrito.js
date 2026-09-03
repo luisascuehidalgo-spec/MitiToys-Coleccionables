@@ -17,9 +17,7 @@
       const found = cart.find(x => x.id === key);
       if (found) found.qty += Math.max(1, Math.floor(Number(qty) || 1));
       else cart.push({ id: key, qty: Math.max(1, Math.floor(Number(qty) || 1)) });
-      save(cart);
-      updateBadges();
-      return cart;
+      save(cart); updateBadges(); return cart;
     },
     remove(id) { const cart = read().filter(x => x.id !== String(id)); save(cart); updateBadges(); return cart; },
     setQty(id, qty) {
@@ -34,13 +32,24 @@
 
   function updateBadges() {
     const count = window.MitiToysCart.count();
-    document.querySelectorAll('[data-cart-count]').forEach(el => {
-      el.textContent = count;
-      el.hidden = count < 1;
-    });
-    document.querySelectorAll('a.cart').forEach(el => {
-      el.href = '/carrito.html';
-      el.textContent = `🛒 Carrito${count ? ` (${count})` : ''}`;
+    document.querySelectorAll('[data-cart-count]').forEach(el => { el.textContent = count; el.hidden = count < 1; });
+    document.querySelectorAll('a.cart').forEach(el => { el.href = '/carrito.html'; el.textContent = `🛒 Carrito${count ? ` (${count})` : ''}`; });
+  }
+
+  function addButtonsToExistingCards() {
+    document.querySelectorAll('#catalogo .card').forEach(card => {
+      if (card.querySelector('.cart-add')) return;
+      const badge = card.querySelector('.badge');
+      const pay = card.querySelector('.paybtn');
+      if (!badge || !pay) return;
+      const id = badge.textContent.replace(/^COD\s*/i, '').trim();
+      if (!id) return;
+      const btn = document.createElement('button');
+      btn.className = 'paybtn cart-add';
+      btn.type = 'button';
+      btn.textContent = '🛒 AGREGAR AL CARRITO';
+      btn.onclick = () => window.agregarAlCarrito(id, btn);
+      pay.parentNode.insertBefore(btn, pay);
     });
   }
 
@@ -54,6 +63,8 @@
     }
   };
 
-  document.addEventListener('DOMContentLoaded', updateBadges);
+  document.addEventListener('DOMContentLoaded', () => { addButtonsToExistingCards(); updateBadges(); });
+  const observer = new MutationObserver(() => { addButtonsToExistingCards(); updateBadges(); });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
   updateBadges();
 })();
