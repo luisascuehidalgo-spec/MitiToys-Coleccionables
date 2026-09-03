@@ -1,7 +1,6 @@
 {
-  "routes": [
-    { "src": "/", "dest": "/api/storefront.js" },
-    { "src": "/index.html", "dest": "/api/storefront.js" },
-    { "handle": "filesystem" }
+  "rewrites": [
+    { "source": "/", "destination": "/api/storefront" },
+    { "source": "/index.html", "destination": "/api/storefront" }
   ]
 }
