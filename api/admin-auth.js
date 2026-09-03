@@ -1,3 +1,4 @@
+// Mititoys admin authentication
 const crypto = require('crypto');
 
 function sign(value) {
