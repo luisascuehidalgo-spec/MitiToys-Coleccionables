@@ -12,6 +12,24 @@
   const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const logo='https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/WhatsApp%20Image%202026-09-01%20at%208.31.48%20PM.jpeg';
 
+  function enhanceDetailLinks(grid){
+    grid.querySelectorAll('.card').forEach(card=>{
+      if(card.querySelector('.detail-link')) return;
+      const badge=card.querySelector('.badge');
+      if(!badge) return;
+      const id=badge.textContent.replace(/^COD\s*/i,'').trim();
+      if(!id) return;
+      const link=document.createElement('a');
+      link.className='buy detail-link';
+      link.href=`/producto.html?id=${encodeURIComponent(id)}`;
+      link.textContent='👁 VER DETALLE DEL PRODUCTO';
+      const body=card.querySelector('.body');
+      const whatsapp=body?.querySelector('a.buy:not(.detail-link)');
+      if(whatsapp) body.insertBefore(link,whatsapp);
+      else body?.appendChild(link);
+    });
+  }
+
   function renderProduct(grid,p){
     if(!p || p.active===false) return;
     const existing=[...grid.querySelectorAll('.badge')].some(x=>x.textContent.replace(/^COD\s*/i,'').trim()===String(p.id));
@@ -24,7 +42,7 @@
     const card=document.createElement('article');
     card.className='card dynamic-product';
     card.dataset.productId=String(p.id);
-    card.innerHTML=`<div class="gallery"><div class="main-photo"><span class="badge">COD ${esc(p.id)}</span><img class="mainimg" src="${esc(imgs[0])}" alt="${esc(p.title)}"><img class="watermark" src="${logo}" alt="Logo Mititoys coleccionables"></div><div class="thumbs">${thumbs}</div></div><div class="body"><h3>${esc(p.title)}</h3><p class="desc">${esc(p.description||'Figura coleccionable de anime.')}</p><div class="specs"><span>⭐ Coleccionable</span><span>📦 Producto Mititoys</span></div><div class="price">${money(p.price)} ARS</div><button class="paybtn cart-add" type="button">🛒 AGREGAR AL CARRITO</button><button class="paybtn pay-now" type="button">💳 PAGAR CON MERCADO PAGO</button><a class="buy" target="_blank" rel="noopener" href="https://wa.me/541133466187?text=${encodeURIComponent('Hola, quiero consultar por la figura '+p.title+' COD '+p.id)}">💬 CONSULTAR POR WHATSAPP</a></div>`;
+    card.innerHTML=`<div class="gallery"><div class="main-photo"><span class="badge">COD ${esc(p.id)}</span><img class="mainimg" src="${esc(imgs[0])}" alt="${esc(p.title)}"><img class="watermark" src="${logo}" alt="Logo Mititoys coleccionables"></div><div class="thumbs">${thumbs}</div></div><div class="body"><h3>${esc(p.title)}</h3><p class="desc">${esc(p.description||'Figura coleccionable de anime.')}</p><div class="specs"><span>⭐ Coleccionable</span><span>📦 Producto Mititoys</span></div><div class="price">${money(p.price)} ARS</div><button class="paybtn cart-add" type="button">🛒 AGREGAR AL CARRITO</button><button class="paybtn pay-now" type="button">💳 PAGAR CON MERCADO PAGO</button><a class="buy detail-link" href="/producto.html?id=${encodeURIComponent(p.id)}">👁 VER DETALLE DEL PRODUCTO</a><a class="buy" target="_blank" rel="noopener" href="https://wa.me/541133466187?text=${encodeURIComponent('Hola, quiero consultar por la figura '+p.title+' COD '+p.id)}">💬 CONSULTAR POR WHATSAPP</a></div>`;
 
     card.querySelectorAll('.thumbwrap').forEach(t=>{
       t.addEventListener('click',()=>{
@@ -64,6 +82,8 @@
     const grid=document.querySelector('#catalogo .grid');
     if(!grid) return;
 
+    enhanceDetailLinks(grid);
+
     let products=[];
     try{
       const r=await fetch('/api/productos?cb='+Date.now(),{cache:'no-store',headers:{'Accept':'application/json'}});
@@ -78,6 +98,7 @@
     const map=new Map(products.map(p=>[String(p.id),p]));
     if(!map.has('3431')) map.set('3431',FALLBACK_3431);
     for(const p of map.values()) renderProduct(grid,p);
+    enhanceDetailLinks(grid);
   }
 
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',load,{once:true});
