@@ -10,6 +10,10 @@ module.exports = async (req,res)=>{
       const orders=await sql`SELECT o.id,o.order_number,o.product_id,o.product_title,o.quantity,o.unit_price,o.total_amount,o.currency,o.status,o.payment_id,o.payment_status,o.payment_status_detail,o.shipping_status,o.shipping_recipient,o.shipping_address,o.shipping_city,o.shipping_postal_code,o.shipping_phone,o.shipping_notes,o.shipping_carrier,o.tracking_number,o.created_at,o.updated_at,c.id AS customer_id,c.name AS customer_name,c.email AS customer_email,c.phone AS customer_phone,c.address AS customer_address,c.city AS customer_city,c.postal_code AS customer_postal_code FROM orders o LEFT JOIN customers c ON c.id=o.customer_id ORDER BY o.created_at DESC LIMIT 500`;
       const customers=await sql`SELECT c.id,c.name,c.email,c.phone,c.city,c.created_at,COUNT(o.id)::int AS orders_count,COALESCE(SUM(CASE WHEN o.payment_status='approved' THEN o.total_amount ELSE 0 END),0)::numeric AS total_spent FROM customers c LEFT JOIN orders o ON o.customer_id=c.id GROUP BY c.id ORDER BY c.created_at DESC LIMIT 500`;
       const products=await sql`SELECT id,title,description,images,price,stock_quantity,stock_managed,active,created_at,updated_at FROM products ORDER BY active DESC,title ASC`;
+      const uploaded=await sql`SELECT id,product_id,filename,mime_type,sort_order,created_at FROM product_images ORDER BY product_id,sort_order,id`;
+      const productImages={};
+      for(const image of uploaded){ if(!productImages[image.product_id]) productImages[image.product_id]=[]; productImages[image.product_id].push({id:image.id,filename:image.filename,mime_type:image.mime_type,sort_order:image.sort_order,url:'/api/product-image?id='+image.id}); }
+      for(const product of products) product.uploaded_images=productImages[product.id]||[];
       return res.status(200).json({orders,customers,products});
     }
     if(req.method==='PATCH'){
