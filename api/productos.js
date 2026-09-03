@@ -17,7 +17,7 @@ module.exports = async (req, res) => {
       const images = [...legacy, ...stored.map(x => x.url)].slice(0, 8);
       return { ...p, images };
     });
-    res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=300');
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json({ products: result });
   } catch (error) {
     console.error('products api error:', error);
