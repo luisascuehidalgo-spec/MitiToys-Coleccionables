@@ -12,6 +12,34 @@
   const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const logo='https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/WhatsApp%20Image%202026-09-01%20at%208.31.48%20PM.jpeg';
 
+  function enhanceStoreTrust(){
+    const nav=document.querySelector('.links');
+    if(nav&&!nav.querySelector('[data-track-link]')){
+      const a=document.createElement('a');
+      a.href='/seguimiento.html';
+      a.dataset.trackLink='1';
+      a.textContent='Seguir pedido';
+      nav.appendChild(a);
+    }
+
+    if(!document.getElementById('mititoysTrustStyle')){
+      const style=document.createElement('style');
+      style.id='mititoysTrustStyle';
+      style.textContent='.mt-support{max-width:1200px;margin:0 auto 55px;padding:0 22px}.mt-supportbox{background:linear-gradient(135deg,#111,#17100b);border:1px solid #30271d;border-radius:18px;padding:28px}.mt-supportbox h2{margin:0 0 8px;font-size:28px;color:#ffd21c}.mt-supportbox>p{margin:0 0 20px;color:#aaa}.mt-supportgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.mt-supportcard{display:block;background:#171717;border:1px solid #2a2a2a;border-radius:12px;padding:18px;transition:.2s}.mt-supportcard:hover{transform:translateY(-2px);border-color:#555}.mt-supportcard b{display:block;margin-bottom:7px;font-size:16px}.mt-supportcard span{color:#aaa;font-size:13px;line-height:1.5}.mt-footerlinks{display:flex;justify-content:center;gap:18px;flex-wrap:wrap;margin-top:12px}.mt-footerlinks a{color:#bbb;font-size:13px}@media(max-width:760px){.mt-supportgrid{grid-template-columns:1fr}}';
+      document.head.appendChild(style);
+    }
+
+    const footer=document.querySelector('footer');
+    if(footer&&!document.getElementById('mititoysSupport')){
+      const section=document.createElement('section');
+      section.className='mt-support';
+      section.id='mititoysSupport';
+      section.innerHTML='<div class="mt-supportbox"><h2>Comprá con tranquilidad</h2><p>Te acompañamos antes, durante y después de tu compra.</p><div class="mt-supportgrid"><a class="mt-supportcard" href="/seguimiento.html"><b>📦 Seguí tu pedido</b><span>Consultá de forma segura el estado del pago y del envío.</span></a><a class="mt-supportcard" href="/preguntas.html"><b>❓ Preguntas frecuentes</b><span>Encontrá respuestas rápidas sobre compras, pagos y entregas.</span></a><a class="mt-supportcard" href="/politicas.html"><b>🛡️ Políticas de compra</b><span>Información clara para comprar con mayor confianza.</span></a></div></div>';
+      footer.parentNode.insertBefore(section,footer);
+      footer.innerHTML='© 2026 Mititoys coleccionables · Figuras de anime para coleccionistas<div class="mt-footerlinks"><a href="/seguimiento.html">Seguimiento</a><a href="/preguntas.html">Preguntas frecuentes</a><a href="/politicas.html">Políticas</a><a target="_blank" rel="noopener" href="https://wa.me/541133466187">WhatsApp</a></div>';
+    }
+  }
+
   function enhanceDetailLinks(grid){
     grid.querySelectorAll('.card').forEach(card=>{
       if(card.querySelector('.detail-link')) return;
@@ -79,6 +107,7 @@
   }
 
   async function load(){
+    enhanceStoreTrust();
     const grid=document.querySelector('#catalogo .grid');
     if(!grid) return;
 
