@@ -1,4 +1,5 @@
 const { getDb } = require('../lib/db');
+const { ensureReviewInvites } = require('../lib/notifications');
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
@@ -20,9 +21,11 @@ module.exports = async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'No encontramos un pedido que coincida con ese número y email.' });
 
     const order = rows[0];
-    const [items, events] = await Promise.all([
+    if (order.status === 'delivered') await ensureReviewInvites(sql, order.id);
+    const [items, events, reviewInvites] = await Promise.all([
       sql`SELECT product_id,product_title,quantity,unit_price,total_amount FROM order_items WHERE order_id=${order.id} ORDER BY id`,
-      sql`SELECT event_type,new_status,payload,created_at FROM order_events WHERE order_id=${order.id} ORDER BY created_at,id`
+      sql`SELECT event_type,new_status,payload,created_at FROM order_events WHERE order_id=${order.id} ORDER BY created_at,id`,
+      sql`SELECT r.product_id,r.review_token,r.status,p.title AS product_title FROM reviews r JOIN products p ON p.id=r.product_id WHERE r.order_id=${order.id} ORDER BY r.id`
     ]);
     const providerTracking = [];
     for (const event of events) {
@@ -40,6 +43,7 @@ module.exports = async (req, res) => {
     order.items = items;
     order.timeline = timeline;
     order.tracking_events = providerTracking.map(({ key, ...entry }) => entry);
+    order.review_links = order.status === 'delivered' ? reviewInvites.map(review => ({ product_id: review.product_id, product_title: review.product_title, status: review.status, url: '/opinar.html?token=' + encodeURIComponent(review.review_token) })) : [];
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json({ order });
   } catch (error) {
