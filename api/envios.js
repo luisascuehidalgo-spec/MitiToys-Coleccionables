@@ -11,6 +11,15 @@ const {
 } = require('../lib/shipping');
 
 module.exports = async (req, res) => {
+  if (req.method === 'GET') {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    return res.status(200).json({
+      enabled: shippingEnabled(),
+      provider: shippingEnabled() ? 'Envíopack' : null,
+      mode: 'home_delivery'
+    });
+  }
+
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido.' });
   if (!shippingEnabled()) return res.status(503).json({ code: 'SHIPPING_NOT_CONFIGURED', error: 'La cotización automática todavía no está habilitada.' });
 
@@ -77,7 +86,7 @@ module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json({ postal_code: postalCode, province_code: provinceCode, expires_at: expiresAt.toISOString(), options });
   } catch (error) {
-    console.error('cotizar-envio error:', error);
+    console.error('envios quote error:', error);
     const status = error?.code === 'NO_SHIPPING_RATES' ? 404 : error?.code === 'DESTINATION_MISMATCH' ? 400 : error?.code === 'SHIPPING_NOT_CONFIGURED' ? 503 : 502;
     return res.status(status).json({ code: error?.code || 'SHIPPING_QUOTE_ERROR', error: error?.message || 'No se pudo calcular el envío.' });
   }

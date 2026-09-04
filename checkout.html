@@ -138,7 +138,7 @@
       selectedShipping = null;
       renderSummary();
       try {
-        const response = await fetch('/api/cotizar-envio', {
+        const response = await fetch('/api/envios', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items: cart, province_code: province, postal_code: postal })
@@ -164,7 +164,7 @@
       try {
         const [productsResponse, shippingResponse] = await Promise.all([
           fetch('/api/productos?cb=' + Date.now(), { cache: 'no-store' }),
-          fetch('/api/envios-config?cb=' + Date.now(), { cache: 'no-store' }).catch(() => null)
+          fetch('/api/envios?cb=' + Date.now(), { cache: 'no-store' }).catch(() => null)
         ]);
         const productData = await productsResponse.json();
         if (!productsResponse.ok) throw new Error(productData.error || 'No se pudo cargar el catálogo.');
