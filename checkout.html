@@ -1,1 +1,240 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mititoys · Checkout</title><style>:root{--red:#ef2525;--yellow:#ffd21c;--bg:#070707;--card:#121212;--line:#292929;--muted:#aaa}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:820px;margin:auto;padding:32px 18px}.back{display:inline-block;margin-bottom:18px;color:var(--yellow);text-decoration:none}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:25px}.brand{color:var(--yellow);font-size:28px;font-weight:900}.summary{background:#191919;border-radius:10px;padding:15px;margin:20px 0}.summary-item{display:flex;justify-content:space-between;gap:15px;padding:10px 0;border-bottom:1px solid #292929}.summary-item:last-child{border-bottom:0}.summary-item small{color:#999}.total{display:flex;justify-content:space-between;margin-top:14px;font-size:23px;font-weight:900;color:var(--yellow)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{display:grid;gap:6px;color:#ccc;font-size:14px}input,textarea{width:100%;box-sizing:border-box;padding:12px;border-radius:8px;border:1px solid #444;background:#0d0d0d;color:#fff}textarea{min-height:90px;resize:vertical}.full{grid-column:1/-1}.btn{width:100%;padding:14px;border:0;border-radius:9px;background:var(--red);color:#fff;font-weight:900;font-size:16px;cursor:pointer;margin-top:18px}.btn:disabled{opacity:.6}.error{color:#ff6b6b;margin-top:12px}.hint{color:#999;line-height:1.5}@media(max-width:600px){.grid{grid-template-columns:1fr}.full{grid-column:auto}}</style></head><body><div class="wrap"><a class="back" href="/carrito.html">← Volver al carrito</a><div class="card"><div class="brand">Mititoys coleccionables</div><h1>Finalizar compra</h1><p class="hint">Completá tus datos. Tu carrito completo se enviará en un único pedido a Mercado Pago.</p><div id="summary" class="summary">Cargando productos...</div><form id="form"><div class="grid"><label>Nombre y apellido *<input id="name" required maxlength="120" autocomplete="name"></label><label>Email *<input id="email" type="email" required maxlength="160" autocomplete="email"></label><label>Teléfono *<input id="phone" required maxlength="50" autocomplete="tel"></label><label>Ciudad *<input id="city" required maxlength="100" autocomplete="address-level2"></label><label class="full">Dirección de entrega *<input id="address" required maxlength="200" autocomplete="street-address"></label><label>Código postal *<input id="postal" required maxlength="20" autocomplete="postal-code"></label><label class="full">Indicaciones para la entrega<textarea id="notes" maxlength="1000" placeholder="Piso, departamento, horario u otra indicación"></textarea></label></div><button id="submit" class="btn">CONTINUAR A MERCADO PAGO</button><div id="error" class="error"></div></form></div></div><script src="/carrito.js?v=4"></script><script>const money=n=>new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(Number(n||0));const cart=window.MitiToysCart.get();const summary=document.getElementById('summary');let products=[];function esc(s){return String(s??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]))}async function load(){if(!cart.length){summary.innerHTML='<b>Tu carrito está vacío.</b><br><a href="/carrito.html">Volver al carrito</a>';document.getElementById('form').remove();return}try{const r=await fetch('/api/productos?cb='+Date.now(),{cache:'no-store'});const j=await r.json();if(!r.ok)throw new Error(j.error||'No se pudo cargar el catálogo.');products=Array.isArray(j.products)?j.products:[];const items=cart.map(x=>{const p=products.find(y=>String(y.id)===String(x.id));return p?{id:String(p.id),title:p.title,qty:Math.max(1,Math.floor(Number(x.qty)||1)),unit_price:Number(p.price||0)}:null}).filter(Boolean);if(items.length!==cart.length)throw new Error('Uno de los productos del carrito ya no está disponible. Volvé al carrito y revisalo.');const total=items.reduce((s,x)=>s+x.unit_price*x.qty,0);summary.innerHTML=items.map(x=>`<div class="summary-item"><div><b>${esc(x.title)}</b><br><small>COD ${esc(x.id)} · ${x.qty} ${x.qty===1?'unidad':'unidades'}</small></div><strong>${money(x.unit_price*x.qty)}</strong></div>`).join('')+`<div class="total"><span>Total</span><span>${money(total)}</span></div>`}catch(e){summary.innerHTML='<p class="error">'+esc(e.message||'No se pudo cargar el pedido.')+'</p>';document.getElementById('form')?.remove()}}document.getElementById('form')?.addEventListener('submit',async e=>{e.preventDefault();const btn=document.getElementById('submit'),error=document.getElementById('error');error.textContent='';btn.disabled=true;btn.textContent='⏳ PREPARANDO PEDIDO...';const customer={name:document.getElementById('name').value.trim(),email:document.getElementById('email').value.trim(),phone:document.getElementById('phone').value.trim(),address:document.getElementById('address').value.trim(),city:document.getElementById('city').value.trim(),postal_code:document.getElementById('postal').value.trim(),notes:document.getElementById('notes').value.trim()};try{const r=await fetch('/api/crear-preferencia-carrito',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:cart,customer})});const j=await r.json().catch(()=>({}));if(!r.ok||!j.init_point)throw new Error(j.error||'No se pudo preparar la compra.');window.MitiToysCart.clear();location.href=j.init_point}catch(err){error.textContent=err.message||'No se pudo iniciar el pago.';btn.disabled=false;btn.textContent='CONTINUAR A MERCADO PAGO'}});load();</script></body></html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mititoys · Checkout seguro</title>
+  <style>
+    :root{--red:#ef2525;--yellow:#ffd21c;--bg:#070707;--card:#121212;--soft:#191919;--line:#292929;--muted:#aaa;--green:#79dc75}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:940px;margin:auto;padding:32px 18px 60px}.back{display:inline-block;margin-bottom:18px;color:var(--yellow);text-decoration:none}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px}.brand{color:var(--yellow);font-size:28px;font-weight:900}.lead{color:#bbb;line-height:1.55}.summary{background:var(--soft);border-radius:12px;padding:16px;margin:20px 0}.summary-item{display:flex;justify-content:space-between;gap:15px;padding:10px 0;border-bottom:1px solid #2d2d2d}.summary-item:last-child{border-bottom:0}.summary-item small{color:#999}.totals{border-top:1px solid #363636;margin-top:10px;padding-top:10px}.total-row{display:flex;justify-content:space-between;gap:15px;padding:5px 0;color:#ddd}.total-row.final{font-size:23px;font-weight:900;color:var(--yellow);padding-top:10px}.section{margin-top:26px}.section-title{display:flex;align-items:center;gap:10px;margin:0 0 14px;font-size:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}label{display:grid;gap:7px;color:#ddd;font-size:14px;font-weight:700}input,textarea,select{width:100%;padding:12px;border-radius:9px;border:1px solid #444;background:#0d0d0d;color:#fff;font:inherit}input:focus,textarea:focus,select:focus{outline:2px solid #ffd21c55;border-color:var(--yellow)}textarea{min-height:90px;resize:vertical}.full{grid-column:1/-1}.shipping-card{background:#101710;border:1px solid #294c29;border-radius:13px;padding:17px;margin-top:13px}.shipping-head{display:flex;justify-content:space-between;gap:16px;align-items:center}.shipping-head p{margin:5px 0 0;color:#b7cbb7;font-size:13px;line-height:1.45}.quote-button{border:0;border-radius:9px;padding:11px 15px;background:var(--yellow);color:#111;font-weight:900;cursor:pointer;white-space:nowrap}.quote-button:disabled{opacity:.6}.shipping-options{display:grid;gap:10px;margin-top:14px}.shipping-option{display:flex;align-items:center;gap:12px;border:1px solid #365536;background:#0c120c;border-radius:11px;padding:13px;cursor:pointer}.shipping-option:has(input:checked){border-color:var(--green);box-shadow:0 0 0 1px var(--green)}.shipping-option input{width:auto;accent-color:var(--green)}.shipping-option .details{display:flex;justify-content:space-between;align-items:center;gap:14px;width:100%}.shipping-option strong{display:block}.shipping-option small{color:#aeb9ae}.shipping-option .amount{color:var(--yellow);font-weight:900;white-space:nowrap}.recommended{display:inline-block;background:#245d24;color:#caffca;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:900;margin-left:6px}.secure{display:flex;gap:8px;align-items:center;color:#bbb;font-size:13px;margin-top:14px}.btn{width:100%;padding:15px;border:0;border-radius:10px;background:var(--red);color:#fff;font-weight:900;font-size:16px;cursor:pointer;margin-top:20px}.btn:disabled{opacity:.6;cursor:not-allowed}.error{color:#ff7676;margin-top:12px;line-height:1.45}.ok{color:#a7efa4;margin-top:12px;line-height:1.45}.hint{color:#999;line-height:1.5;font-size:13px}@media(max-width:650px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.card{padding:20px}.shipping-head{display:block}.quote-button{width:100%;margin-top:13px}.shipping-option .details{align-items:flex-start}.summary-item{font-size:14px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <a class="back" href="/carrito.html">← Volver al carrito</a>
+    <section class="card">
+      <div class="brand">Mititoys coleccionables</div>
+      <h1>Finalizar compra</h1>
+      <p id="checkoutLead" class="lead">Completá los datos de entrega. Antes de pagar vas a ver el correo, el costo del envío y el plazo estimado para tu código postal.</p>
+
+      <div id="summary" class="summary">Cargando productos...</div>
+
+      <form id="form">
+        <section class="section">
+          <h2 class="section-title">👤 Datos de contacto</h2>
+          <div class="grid">
+            <label>Nombre y apellido *<input id="name" required maxlength="120" autocomplete="name"></label>
+            <label>Email *<input id="email" type="email" required maxlength="160" autocomplete="email"></label>
+            <label>Teléfono *<input id="phone" required maxlength="50" autocomplete="tel"></label>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2 class="section-title">📍 Dirección de entrega</h2>
+          <div class="grid">
+            <label>Provincia *
+              <select id="province" required autocomplete="address-level1">
+                <option value="">Seleccioná una provincia</option>
+                <option value="C">Ciudad Autónoma de Buenos Aires</option>
+                <option value="B">Buenos Aires</option>
+                <option value="K">Catamarca</option><option value="H">Chaco</option><option value="U">Chubut</option>
+                <option value="X">Córdoba</option><option value="W">Corrientes</option><option value="E">Entre Ríos</option>
+                <option value="P">Formosa</option><option value="Y">Jujuy</option><option value="L">La Pampa</option>
+                <option value="F">La Rioja</option><option value="M">Mendoza</option><option value="N">Misiones</option>
+                <option value="Q">Neuquén</option><option value="R">Río Negro</option><option value="A">Salta</option>
+                <option value="J">San Juan</option><option value="D">San Luis</option><option value="Z">Santa Cruz</option>
+                <option value="S">Santa Fe</option><option value="G">Santiago del Estero</option><option value="V">Tierra del Fuego</option>
+                <option value="T">Tucumán</option>
+              </select>
+            </label>
+            <label>Localidad / ciudad *<input id="city" required maxlength="100" autocomplete="address-level2"></label>
+            <label class="full">Dirección de entrega *<input id="address" required maxlength="200" autocomplete="street-address" placeholder="Calle, número, piso y departamento"></label>
+            <label>Código postal *<input id="postal" required maxlength="8" inputmode="numeric" autocomplete="postal-code" placeholder="Ej: 1405"></label>
+            <label class="full">Indicaciones para la entrega<textarea id="notes" maxlength="1000" placeholder="Timbre, referencias u horario de recepción"></textarea></label>
+          </div>
+        </section>
+
+        <section id="shippingSection" class="section" hidden>
+          <h2 class="section-title">🚚 Elegí el envío</h2>
+          <div class="shipping-card">
+            <div class="shipping-head">
+              <div><strong>Cotización real por código postal</strong><p>Comparamos las opciones disponibles para tu destino. La primera opción es la de menor costo.</p></div>
+              <button id="quoteButton" class="quote-button" type="button">CALCULAR ENVÍO</button>
+            </div>
+            <div id="shippingMessage" class="hint">Seleccioná provincia e ingresá tu código postal.</div>
+            <div id="shippingOptions" class="shipping-options"></div>
+          </div>
+        </section>
+
+        <button id="submit" class="btn">CONTINUAR A MERCADO PAGO</button>
+        <div class="secure">🔒 El precio de los productos y del envío se verifican nuevamente en el servidor antes del pago.</div>
+        <div id="error" class="error" role="alert"></div>
+      </form>
+    </section>
+  </main>
+
+  <script src="/carrito.js?v=7"></script>
+  <script>
+    const money = value => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(Number(value || 0));
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    const cart = window.MitiToysCart.get();
+    const summary = document.getElementById('summary');
+    const form = document.getElementById('form');
+    let products = [];
+    let checkoutItems = [];
+    let subtotal = 0;
+    let shippingEnabled = false;
+    let selectedShipping = null;
+
+    function provinceName() {
+      const select = document.getElementById('province');
+      return select.options[select.selectedIndex]?.text || '';
+    }
+
+    function renderSummary() {
+      const shippingAmount = selectedShipping ? Number(selectedShipping.amount) : 0;
+      const itemRows = checkoutItems.map(item => `<div class="summary-item"><div><b>${esc(item.title)}</b><br><small>COD ${esc(item.id)} · ${item.qty} ${item.qty === 1 ? 'unidad' : 'unidades'}</small></div><strong>${money(item.unit_price * item.qty)}</strong></div>`).join('');
+      const shippingRow = shippingEnabled
+        ? `<div class="total-row"><span>Envío${selectedShipping ? ` · ${esc(selectedShipping.carrier_name)}` : ''}</span><span>${selectedShipping ? money(shippingAmount) : 'A calcular'}</span></div>`
+        : '';
+      summary.innerHTML = itemRows + `<div class="totals"><div class="total-row"><span>Subtotal</span><span>${money(subtotal)}</span></div>${shippingRow}<div class="total-row final"><span>Total</span><span>${money(subtotal + shippingAmount)}</span></div></div>`;
+    }
+
+    function invalidateShipping() {
+      selectedShipping = null;
+      document.getElementById('shippingOptions').innerHTML = '';
+      document.getElementById('shippingMessage').textContent = 'Destino modificado. Calculá el envío nuevamente.';
+      renderSummary();
+    }
+
+    function selectShipping(option) {
+      selectedShipping = option;
+      renderSummary();
+    }
+
+    function renderShippingOptions(options) {
+      const container = document.getElementById('shippingOptions');
+      container.innerHTML = options.map((option, index) => {
+        const eta = option.estimated_days ? `${option.estimated_days} ${option.estimated_days === 1 ? 'día estimado' : 'días estimados'}` : 'Plazo a confirmar';
+        return `<label class="shipping-option"><input type="radio" name="shipping" value="${esc(option.quote_id)}" ${index === 0 ? 'checked' : ''}><span class="details"><span><strong>${esc(option.carrier_name)} · ${esc(option.service_name)}${index === 0 ? '<span class="recommended">RECOMENDADO</span>' : ''}</strong><small>${esc(eta)}</small></span><span class="amount">${money(option.amount)}</span></span></label>`;
+      }).join('');
+      container.querySelectorAll('input[name="shipping"]').forEach((input, index) => input.addEventListener('change', () => selectShipping(options[index])));
+      selectedShipping = options[0] || null;
+      document.getElementById('shippingMessage').textContent = options.length ? 'Elegí la opción que preferís. La cotización se reserva durante 15 minutos.' : '';
+      renderSummary();
+    }
+
+    async function quoteShipping() {
+      const province = document.getElementById('province').value;
+      const postal = document.getElementById('postal').value.trim();
+      const button = document.getElementById('quoteButton');
+      const message = document.getElementById('shippingMessage');
+      if (!province) { message.textContent = 'Seleccioná la provincia de destino.'; return; }
+      if (!/\d{4}/.test(postal)) { message.textContent = 'Ingresá un código postal argentino de 4 dígitos.'; return; }
+      button.disabled = true;
+      button.textContent = 'COTIZANDO...';
+      message.textContent = 'Consultando correos disponibles para tu destino...';
+      document.getElementById('shippingOptions').innerHTML = '';
+      selectedShipping = null;
+      renderSummary();
+      try {
+        const response = await fetch('/api/cotizar-envio', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: cart, province_code: province, postal_code: postal })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'No se pudo calcular el envío.');
+        if (!Array.isArray(data.options) || !data.options.length) throw new Error('No encontramos un correo disponible para ese destino.');
+        renderShippingOptions(data.options);
+      } catch (error) {
+        message.textContent = error.message || 'No se pudo calcular el envío.';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'CALCULAR ENVÍO';
+      }
+    }
+
+    async function load() {
+      if (!cart.length) {
+        summary.innerHTML = '<b>Tu carrito está vacío.</b><br><a href="/carrito.html">Volver al carrito</a>';
+        form.remove();
+        return;
+      }
+      try {
+        const [productsResponse, shippingResponse] = await Promise.all([
+          fetch('/api/productos?cb=' + Date.now(), { cache: 'no-store' }),
+          fetch('/api/envios-config?cb=' + Date.now(), { cache: 'no-store' }).catch(() => null)
+        ]);
+        const productData = await productsResponse.json();
+        if (!productsResponse.ok) throw new Error(productData.error || 'No se pudo cargar el catálogo.');
+        products = Array.isArray(productData.products) ? productData.products : [];
+        checkoutItems = cart.map(entry => {
+          const product = products.find(candidate => String(candidate.id) === String(entry.id));
+          return product ? { id: String(product.id), title: product.title, qty: Math.max(1, Math.floor(Number(entry.qty) || 1)), unit_price: Number(product.price || 0) } : null;
+        }).filter(Boolean);
+        if (checkoutItems.length !== cart.length) throw new Error('Uno de los productos del carrito ya no está disponible. Volvé al carrito y revisalo.');
+        subtotal = checkoutItems.reduce((sum, item) => sum + item.unit_price * item.qty, 0);
+        if (shippingResponse?.ok) {
+          const config = await shippingResponse.json();
+          shippingEnabled = config.enabled === true;
+        }
+        document.getElementById('shippingSection').hidden = !shippingEnabled;
+        if (!shippingEnabled) document.getElementById('checkoutLead').textContent = 'Completá tus datos. Tu carrito completo se enviará en un único pedido a Mercado Pago.';
+        renderSummary();
+      } catch (error) {
+        summary.innerHTML = '<p class="error">' + esc(error.message || 'No se pudo cargar el pedido.') + '</p>';
+        form.remove();
+      }
+    }
+
+    document.getElementById('quoteButton').addEventListener('click', quoteShipping);
+    document.getElementById('province').addEventListener('change', () => { if (shippingEnabled) invalidateShipping(); });
+    document.getElementById('postal').addEventListener('input', () => { if (shippingEnabled && selectedShipping) invalidateShipping(); });
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = document.getElementById('submit');
+      const error = document.getElementById('error');
+      error.textContent = '';
+      if (shippingEnabled && !selectedShipping) {
+        error.textContent = 'Calculá y seleccioná el envío antes de continuar.';
+        document.getElementById('shippingSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      button.disabled = true;
+      button.textContent = '⏳ PREPARANDO PEDIDO...';
+      const province = document.getElementById('province');
+      const customer = {
+        name: document.getElementById('name').value.trim(),
+        email: document.getElementById('email').value.trim(),
+        phone: document.getElementById('phone').value.trim(),
+        address: document.getElementById('address').value.trim(),
+        city: document.getElementById('city').value.trim(),
+        province_code: province.value,
+        province_name: provinceName(),
+        postal_code: document.getElementById('postal').value.trim(),
+        notes: document.getElementById('notes').value.trim()
+      };
+      try {
+        const response = await fetch('/api/crear-preferencia-carrito', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: cart, customer, shipping_quote_id: selectedShipping?.quote_id || null })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.init_point) throw new Error(data.error || 'No se pudo preparar la compra.');
+        window.MitiToysCart.clear();
+        location.href = data.init_point;
+      } catch (requestError) {
+        error.textContent = requestError.message || 'No se pudo iniciar el pago.';
+        if (/cotización/i.test(error.textContent)) invalidateShipping();
+        button.disabled = false;
+        button.textContent = 'CONTINUAR A MERCADO PAGO';
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

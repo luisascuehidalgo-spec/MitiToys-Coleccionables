@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mititoys · Configuración de envíos</title>
+  <style>
+    :root{--yellow:#ffd21c;--red:#ef2525;--bg:#070707;--card:#121212;--line:#2c2c2c;--muted:#aaa;--green:#74dc70}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:1120px;margin:auto;padding:30px 18px 60px}a{color:var(--yellow);text-decoration:none}.box{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:21px;margin:18px 0}.hidden{display:none}h1,h2{color:var(--yellow)}.muted{color:var(--muted);line-height:1.5}.bad{color:#ff7373}.ok{color:var(--green)}input,button{padding:11px;border-radius:8px;border:1px solid #444;background:#181818;color:#fff}button{background:var(--red);font-weight:900;cursor:pointer}.products{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.product{background:#0e0e0e;border:1px solid var(--line);border-radius:12px;padding:17px}.product h3{font-size:17px;margin:0 0 5px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px}label{display:grid;gap:6px;color:#ddd;font-size:13px;font-weight:700}input{width:100%}.status{font-size:13px;font-weight:800;margin-top:8px}.save{width:100%;margin-top:14px}.notice{border-left:4px solid var(--yellow);padding-left:13px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}@media(max-width:760px){.products,.grid{grid-template-columns:1fr}.top{display:block}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <a href="/admin.html">← Volver al panel general</a>
+    <div class="top"><div><h1>📦 Configuración de envíos</h1><p class="muted">Peso y medidas de cada producto ya embalado.</p></div><button id="refresh" class="hidden" type="button">↻ ACTUALIZAR</button></div>
+
+    <section id="login" class="box">
+      <h2>Acceso privado</h2>
+      <p class="muted">Usá la misma contraseña del panel de administración.</p>
+      <input id="password" type="password" placeholder="Contraseña" autocomplete="current-password">
+      <button id="loginButton" type="button">ENTRAR</button>
+      <p id="loginError" class="bad"></p>
+    </section>
+
+    <section id="app" class="hidden">
+      <div class="box notice"><strong>Medí el paquete final, no solamente la figura.</strong><p class="muted">Usá caja, protecciones y accesorios incluidos. Las agencias calculan el precio con peso real y volumen; datos incorrectos pueden generar diferencias al despachar.</p></div>
+      <div class="box"><h2>Productos</h2><p id="summary" class="muted"></p><p id="error" class="bad"></p><div id="products" class="products"></div></div>
+    </section>
+  </main>
+  <script>
+    let products = [];
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[char]));
+    const value = id => document.getElementById(id)?.value || '';
+    const numberOrNull = id => Number(value(id)) > 0 ? Number(value(id)) : null;
+
+    async function login() {
+      const error = document.getElementById('loginError');
+      error.textContent = '';
+      const response = await fetch('/api/admin-auth?cb=' + Date.now(), { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ password:value('password') }) });
+      if (!response.ok) { error.textContent = response.status === 401 ? 'Contraseña incorrecta.' : 'No se pudo iniciar sesión.'; return; }
+      document.getElementById('login').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      document.getElementById('refresh').classList.remove('hidden');
+      await load();
+    }
+
+    function ready(product) {
+      return [product.weight_kg, product.package_length_cm, product.package_width_cm, product.package_height_cm].every(item => Number(item) > 0);
+    }
+
+    function render() {
+      const completed = products.filter(ready).length;
+      document.getElementById('summary').textContent = `${completed} de ${products.length} productos listos para cotizar envíos.`;
+      document.getElementById('products').innerHTML = products.map(product => `<article class="product"><h3>${esc(product.title)}</h3><div class="muted">COD ${esc(product.id)}</div><div class="status ${ready(product) ? 'ok' : 'bad'}">${ready(product) ? '✓ Listo para cotizar' : '⚠ Faltan peso o medidas'}</div><div class="grid"><label>Peso embalado (kg)<input id="weight-${esc(product.id)}" type="number" min="0.01" step="0.01" value="${product.weight_kg || ''}" placeholder="Ej: 1.50"></label><label>Largo (cm)<input id="length-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_length_cm || ''}" placeholder="Ej: 35"></label><label>Ancho (cm)<input id="width-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_width_cm || ''}" placeholder="Ej: 25"></label><label>Alto (cm)<input id="height-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_height_cm || ''}" placeholder="Ej: 40"></label></div><button class="save" type="button" onclick="save('${esc(product.id)}')">GUARDAR DATOS DE ENVÍO</button><p id="state-${esc(product.id)}" class="muted"></p></article>`).join('');
+    }
+
+    async function load() {
+      const error = document.getElementById('error');
+      error.textContent = '';
+      const response = await fetch('/api/admin?cb=' + Date.now(), { cache:'no-store' });
+      if (response.status === 401) { location.reload(); return; }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) { error.textContent = data.error || 'No se pudieron cargar los productos.'; return; }
+      products = Array.isArray(data.products) ? data.products : [];
+      render();
+    }
+
+    async function save(id) {
+      const product = products.find(item => String(item.id) === String(id));
+      const state = document.getElementById('state-' + id);
+      const shipping = {
+        weight_kg: numberOrNull('weight-' + id),
+        package_length_cm: numberOrNull('length-' + id),
+        package_width_cm: numberOrNull('width-' + id),
+        package_height_cm: numberOrNull('height-' + id)
+      };
+      if (!Object.values(shipping).every(Boolean)) { state.className = 'bad'; state.textContent = 'Completá los cuatro valores con números mayores a cero.'; return; }
+      state.className = 'muted'; state.textContent = 'Guardando...';
+      const response = await fetch('/api/admin-product', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        id: product.id,
+        title: product.title,
+        description: product.description || '',
+        price: Number(product.price),
+        stock_quantity: Number(product.stock_quantity),
+        stock_managed: Boolean(product.stock_managed),
+        active: Boolean(product.active),
+        images: Array.isArray(product.images) ? product.images : [],
+        ...shipping
+      }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) { state.className = 'bad'; state.textContent = data.error || 'No se pudo guardar.'; return; }
+      state.className = 'ok'; state.textContent = '✓ Datos guardados';
+      await load();
+    }
+
+    document.getElementById('loginButton').addEventListener('click', login);
+    document.getElementById('password').addEventListener('keydown', event => { if (event.key === 'Enter') login(); });
+    document.getElementById('refresh').addEventListener('click', load);
+  </script>
+</body>
+</html>
