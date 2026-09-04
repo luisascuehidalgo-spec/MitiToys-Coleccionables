@@ -54,8 +54,7 @@ module.exports = async (req, res) => {
           FROM products p LEFT JOIN reviews r ON r.product_id=p.id
           WHERE p.active=true GROUP BY p.id ORDER BY p.title
         `;
-    const ids = products.map(product => product.id);
-    const uploaded = ids.length ? await sql`SELECT id,product_id,sort_order FROM product_images WHERE product_id=ANY(${ids}) ORDER BY product_id,sort_order,id` : [];
+    const uploaded = await sql`SELECT id,product_id,sort_order FROM product_images ORDER BY product_id,sort_order,id`;
     const byProduct = new Map();
     for (const image of uploaded) {
       if (!byProduct.has(image.product_id)) byProduct.set(image.product_id, []);
