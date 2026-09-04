@@ -80,22 +80,25 @@ module.exports = async (req, res) => {
     if (shippingEnabled()) {
       shippingQuoteId = clean(body.shipping_quote_id, 80);
       if (!shippingQuoteId) return res.status(409).json({ code: 'SHIPPING_QUOTE_REQUIRED', error: 'Calculá y seleccioná un envío antes de continuar.' });
-      if (!postalCode || !provinceCode) return res.status(400).json({ error: 'Completá provincia y código postal para validar el envío.' });
+      if (!provinceCode) return res.status(400).json({ error: 'Completá la provincia para validar el envío.' });
 
       const quotes = await sql`
         SELECT id,provider,cart_hash,destination_postal_code,destination_province,
                carrier_id,carrier_name,service_code,service_name,dispatch_mode,
-               amount,currency,estimated_hours,expires_at,used_at
+               amount,currency,estimated_hours,expires_at,used_at,
+               destination_type,destination_locality_id,destination_locality_name,
+               branch_id,branch_name,branch_address,branch_schedule,package_details
         FROM shipping_quotes WHERE id=${shippingQuoteId} LIMIT 1
       `;
       const quote = quotes[0];
+      const quoteType = quote?.destination_type === 'branch' ? 'branch' : 'home';
       const valid = quote && !quote.used_at && new Date(quote.expires_at).getTime() > Date.now()
         && quote.cart_hash === cartHash(normalizedItems)
-        && quote.destination_postal_code === postalCode
         && quote.destination_province === provinceCode
-        && quote.currency === 'ARS';
+        && quote.currency === 'ARS'
+        && (quoteType === 'branch' ? Boolean(quote.branch_id) : quote.destination_postal_code === postalCode);
       if (!valid) return res.status(409).json({ code: 'SHIPPING_QUOTE_EXPIRED', error: 'La cotización venció o cambió el carrito. Calculá el envío nuevamente.' });
-      shipping = { ...quote, amount: Number(quote.amount) };
+      shipping = { ...quote, amount: Number(quote.amount), destination_type: quoteType };
       if (!Number.isFinite(shipping.amount) || shipping.amount < 0) throw new Error('Costo de envío inválido.');
     }
 
@@ -103,10 +106,18 @@ module.exports = async (req, res) => {
     const total = subtotal + shippingAmount;
     const summary = items.length === 1 ? items[0].title : `${items.length} productos: ${items.map(item => `${item.title} x${item.qty}`).join(' · ')}`;
     const provinceName = clean(customer.province_name, 100) || provinceCode || null;
+    const finalPostalCode = shipping?.destination_postal_code || postalCode || null;
+    const street = clean(customer.street, 120);
+    const streetNumber = clean(customer.street_number, 10);
+    const floor = clean(customer.floor, 10);
+    const unit = clean(customer.unit, 10);
+    const homeAddress = [street, streetNumber, floor ? 'Piso ' + floor : '', unit ? 'Depto ' + unit : ''].filter(Boolean).join(' ');
+    const deliveryAddress = shipping?.destination_type === 'branch' ? clean(shipping.branch_address, 220) : (homeAddress || clean(customer.address, 220));
+    const deliveryCity = shipping?.destination_type === 'branch' ? clean(shipping.destination_locality_name, 100) : clean(customer.city, 100);
 
     const customerRows = await sql`
       INSERT INTO customers(name,email,phone,address,city,province,postal_code)
-      VALUES(${clean(customer.name, 120) || 'Cliente'},${email},${clean(customer.phone, 50) || null},${clean(customer.address, 200) || null},${clean(customer.city, 100) || null},${provinceName},${postalCode || null})
+      VALUES(${clean(customer.name, 120) || 'Cliente'},${email},${clean(customer.phone, 50) || null},${deliveryAddress || null},${deliveryCity || null},${provinceName},${finalPostalCode})
       ON CONFLICT(email) DO UPDATE SET
         name=EXCLUDED.name,
         phone=COALESCE(EXCLUDED.phone,customers.phone),
@@ -126,15 +137,19 @@ module.exports = async (req, res) => {
         shipping_recipient,shipping_address,shipping_city,shipping_postal_code,
         shipping_province,shipping_phone,shipping_notes,shipping_provider,
         shipping_carrier_id,shipping_carrier,shipping_service,
-        shipping_estimated_hours,shipping_quote_id
+        shipping_estimated_hours,shipping_quote_id,shipping_destination_type,
+        shipping_locality_id,shipping_street,shipping_number,shipping_floor,shipping_unit,
+        shipping_branch_id,shipping_branch_name,shipping_branch_address
       ) VALUES(
         'MT-'||TO_CHAR(NOW(),'YYYYMMDDHH24MISSMS')||'-'||SUBSTRING(MD5(RANDOM()::text),1,6),
         ${customerId},${first.id},${summary},${units},${first.price},
         ${subtotal},${shippingAmount},${total},${temporaryReference},
-        ${clean(customer.name, 160) || 'Cliente'},${clean(customer.address, 220) || null},${clean(customer.city, 100) || null},${postalCode || null},
+        ${clean(customer.name, 160) || 'Cliente'},${deliveryAddress || null},${deliveryCity || null},${finalPostalCode},
         ${provinceName},${clean(customer.phone, 50) || null},${clean(customer.notes, 1000) || null},${shipping?.provider || null},
         ${shipping?.carrier_id || null},${shipping?.carrier_name || null},${shipping?.service_name || null},
-        ${shipping?.estimated_hours || null},${shippingQuoteId || null}
+        ${shipping?.estimated_hours || null},${shippingQuoteId || null},${shipping?.destination_type || 'home'},
+        ${shipping?.destination_locality_id || null},${street || null},${streetNumber || null},${floor || null},${unit || null},
+        ${shipping?.branch_id || null},${shipping?.branch_name || null},${shipping?.branch_address || null}
       ) RETURNING id,order_number
     `;
     orderId = orderRows[0].id;
@@ -171,8 +186,8 @@ module.exports = async (req, res) => {
     if (shipping) {
       preferenceItems.push({
         id: `ENVIO-${shipping.carrier_id}`,
-        title: `Envío a domicilio · ${shipping.carrier_name}`,
-        description: shipping.service_name || 'Servicio de envío',
+        title: `${shipping.destination_type === 'branch' ? 'Retiro en sucursal' : 'Envío a domicilio'} · ${shipping.carrier_name}`,
+        description: shipping.destination_type === 'branch' ? `${shipping.branch_name || 'Sucursal'} · ${shipping.branch_address || ''}` : (shipping.service_name || 'Servicio de envío'),
         quantity: 1,
         currency_id: 'ARS',
         unit_price: shippingAmount
@@ -200,14 +215,14 @@ module.exports = async (req, res) => {
     const mercadoPago = await mercadoPagoResponse.json().catch(() => ({}));
     if (!mercadoPagoResponse.ok || !mercadoPago.init_point) throw new Error('Mercado Pago rechazó la creación del pago.');
 
-    await sql`UPDATE orders SET preference_id=${mercadoPago.id} WHERE id=${orderId}`;
+    await sql`UPDATE orders SET preference_id=${mercadoPago.id},payment_url=${mercadoPago.init_point} WHERE id=${orderId}`;
     await sql`
       INSERT INTO order_events(order_id,event_type,new_status,payload)
       VALUES(${orderId},'order.created','pending',${JSON.stringify({
         preference_id: mercadoPago.id,
         multi_product: true,
         subtotal,
-        shipping: shipping ? { quote_id: shippingQuoteId, carrier: shipping.carrier_name, service: shipping.service_name, amount: shippingAmount, estimated_hours: shipping.estimated_hours } : null,
+        shipping: shipping ? { quote_id: shippingQuoteId, type: shipping.destination_type, carrier: shipping.carrier_name, service: shipping.service_name, amount: shippingAmount, estimated_hours: shipping.estimated_hours, branch: shipping.branch_name || null } : null,
         items: items.map(item => ({ product_id: item.id, quantity: item.qty, unit_price: item.price })),
         stock_reserved: reserved.map(item => ({ product_id: item.id, quantity: item.qty }))
       })})
