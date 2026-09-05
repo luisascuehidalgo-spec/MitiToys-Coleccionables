@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /admin.html
 Disallow: /api/
-Sitemap: https://otaku-collectibles.vercel.app/sitemap.xml
+Sitemap: https://mititoys.com/sitemap.xml

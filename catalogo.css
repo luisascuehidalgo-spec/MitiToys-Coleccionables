@@ -44,6 +44,11 @@
   font: inherit;
 }
 
+.catalog-sort:focus-visible {
+  outline: 3px solid var(--catalog-yellow);
+  outline-offset: 3px;
+}
+
 .catalog-search input {
   width: 100%;
 }

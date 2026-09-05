@@ -1,4 +1,10 @@
 {
+  "rewrites": [
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/productos?sitemap=1"
+    }
+  ],
   "crons": [
     {
       "path": "/api/envios?action=automation",

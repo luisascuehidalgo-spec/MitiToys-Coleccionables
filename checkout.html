@@ -4,10 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Mititoys · Checkout seguro</title>
+  <meta name="robots" content="noindex,follow">
+  <meta name="theme-color" content="#070707">
   <style>
     :root{--red:#ef2525;--yellow:#ffd21c;--bg:#070707;--card:#121212;--soft:#191919;--line:#292929;--muted:#aaa;--green:#79dc75}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:940px;margin:auto;padding:32px 18px 60px}.back{display:inline-block;margin-bottom:18px;color:var(--yellow);text-decoration:none}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px}.brand{color:var(--yellow);font-size:28px;font-weight:900}.lead{color:#bbb;line-height:1.55}.summary{background:var(--soft);border-radius:12px;padding:16px;margin:20px 0}.summary-item{display:flex;justify-content:space-between;gap:15px;padding:10px 0;border-bottom:1px solid #2d2d2d}.summary-item:last-child{border-bottom:0}.summary-item small{color:#999}.totals{border-top:1px solid #363636;margin-top:10px;padding-top:10px}.total-row{display:flex;justify-content:space-between;gap:15px;padding:5px 0;color:#ddd}.total-row.final{font-size:23px;font-weight:900;color:var(--yellow);padding-top:10px}.section{margin-top:26px}.section-title{display:flex;align-items:center;gap:10px;margin:0 0 14px;font-size:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}label{display:grid;gap:7px;color:#ddd;font-size:14px;font-weight:700}input,textarea,select{width:100%;padding:12px;border-radius:9px;border:1px solid #444;background:#0d0d0d;color:#fff;font:inherit}input:focus,textarea:focus,select:focus{outline:2px solid #ffd21c55;border-color:var(--yellow)}textarea{min-height:90px;resize:vertical}.full{grid-column:1/-1}.delivery-tabs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.delivery-mode{display:flex;align-items:center;gap:10px;border:1px solid #3a3a3a;border-radius:11px;padding:14px;background:#101010;cursor:pointer}.delivery-mode:has(input:checked){border-color:var(--yellow);background:#19170c}.delivery-mode input{width:auto;accent-color:var(--yellow)}.shipping-card{background:#101710;border:1px solid #294c29;border-radius:13px;padding:17px;margin-top:13px}.shipping-head{display:flex;justify-content:space-between;gap:16px;align-items:center}.shipping-head p{margin:5px 0 0;color:#b7cbb7;font-size:13px;line-height:1.45}.quote-button{border:0;border-radius:9px;padding:11px 15px;background:var(--yellow);color:#111;font-weight:900;cursor:pointer;white-space:nowrap}.quote-button:disabled{opacity:.6}.shipping-options{display:grid;gap:10px;margin-top:14px}.shipping-option{display:flex;align-items:center;gap:12px;border:1px solid #365536;background:#0c120c;border-radius:11px;padding:13px;cursor:pointer}.shipping-option:has(input:checked){border-color:var(--green);box-shadow:0 0 0 1px var(--green)}.shipping-option input{width:auto;accent-color:var(--green)}.shipping-option .details{display:flex;justify-content:space-between;align-items:center;gap:14px;width:100%}.shipping-option strong{display:block}.shipping-option small{color:#aeb9ae}.shipping-option .amount{color:var(--yellow);font-weight:900;white-space:nowrap}.recommended{display:inline-block;background:#245d24;color:#caffca;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:900;margin-left:6px}.secure{display:flex;gap:8px;align-items:center;color:#bbb;font-size:13px;margin-top:14px}.btn{width:100%;padding:15px;border:0;border-radius:10px;background:var(--red);color:#fff;font-weight:900;font-size:16px;cursor:pointer;margin-top:20px}.btn:disabled{opacity:.6;cursor:not-allowed}.error{color:#ff7676;margin-top:12px;line-height:1.45}.ok{color:#a7efa4;margin-top:12px;line-height:1.45}.hint{color:#999;line-height:1.5;font-size:13px}@media(max-width:650px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.card{padding:20px}.shipping-head{display:block}.quote-button{width:100%;margin-top:13px}.shipping-option .details{align-items:flex-start}.summary-item{font-size:14px}}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:940px;margin:auto;padding:32px 18px 60px}.back{display:inline-block;margin-bottom:18px;color:var(--yellow);text-decoration:none}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px}.brand{color:var(--yellow);font-size:28px;font-weight:900}.lead{color:#bbb;line-height:1.55}.checkout-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:22px 0}.checkout-step{display:flex;align-items:center;gap:9px;padding:11px;background:#0d0d0d;border:1px solid #303030;border-radius:10px;color:#aaa;font-size:12px;font-weight:800}.checkout-step span{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:#242424;color:#fff}.checkout-step.active{border-color:#655716;color:#fff}.checkout-step.active span{background:var(--yellow);color:#111}.summary{background:var(--soft);border-radius:12px;padding:16px;margin:20px 0}.summary-item{display:flex;justify-content:space-between;gap:15px;padding:10px 0;border-bottom:1px solid #2d2d2d}.summary-item:last-child{border-bottom:0}.summary-item small{color:#999}.totals{border-top:1px solid #363636;margin-top:10px;padding-top:10px}.total-row{display:flex;justify-content:space-between;gap:15px;padding:5px 0;color:#ddd}.total-row.final{font-size:23px;font-weight:900;color:var(--yellow);padding-top:10px}.section{margin-top:26px}.section-title{display:flex;align-items:center;gap:10px;margin:0 0 14px;font-size:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}label{display:grid;gap:7px;color:#ddd;font-size:14px;font-weight:700}input,textarea,select{width:100%;padding:12px;border-radius:9px;border:1px solid #444;background:#0d0d0d;color:#fff;font:inherit}input:focus,textarea:focus,select:focus{outline:2px solid #ffd21c55;border-color:var(--yellow)}textarea{min-height:90px;resize:vertical}.full{grid-column:1/-1}.delivery-tabs{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.delivery-mode{display:flex;align-items:center;gap:10px;border:1px solid #3a3a3a;border-radius:11px;padding:14px;background:#101010;cursor:pointer}.delivery-mode:has(input:checked){border-color:var(--yellow);background:#19170c}.delivery-mode input{width:auto;accent-color:var(--yellow)}.shipping-card{background:#101710;border:1px solid #294c29;border-radius:13px;padding:17px;margin-top:13px}.shipping-head{display:flex;justify-content:space-between;gap:16px;align-items:center}.shipping-head p{margin:5px 0 0;color:#b7cbb7;font-size:13px;line-height:1.45}.quote-button{border:0;border-radius:9px;padding:11px 15px;background:var(--yellow);color:#111;font-weight:900;cursor:pointer;white-space:nowrap}.quote-button:disabled{opacity:.6}.shipping-options{display:grid;gap:10px;margin-top:14px}.shipping-option{display:flex;align-items:center;gap:12px;border:1px solid #365536;background:#0c120c;border-radius:11px;padding:13px;cursor:pointer}.shipping-option:has(input:checked){border-color:var(--green);box-shadow:0 0 0 1px var(--green)}.shipping-option input{width:auto;accent-color:var(--green)}.shipping-option .details{display:flex;justify-content:space-between;align-items:center;gap:14px;width:100%}.shipping-option strong{display:block}.shipping-option small{color:#aeb9ae}.shipping-option .amount{color:var(--yellow);font-weight:900;white-space:nowrap}.recommended{display:inline-block;background:#245d24;color:#caffca;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:900;margin-left:6px}.secure{display:flex;gap:8px;align-items:center;color:#bbb;font-size:13px;margin-top:14px}.btn{width:100%;padding:15px;border:0;border-radius:10px;background:var(--red);color:#fff;font-weight:900;font-size:16px;cursor:pointer;margin-top:20px}.btn:disabled{opacity:.6;cursor:not-allowed}.error{color:#ff7676;margin-top:12px;line-height:1.45}.ok{color:#a7efa4;margin-top:12px;line-height:1.45}.hint{color:#999;line-height:1.5;font-size:13px}.mobile-checkout{display:none}:where(a,button,input,select,textarea):focus-visible{outline:3px solid var(--yellow);outline-offset:3px}@media(max-width:650px){body{padding-bottom:88px}.grid{grid-template-columns:1fr}.full{grid-column:auto}.card{padding:20px}.checkout-steps{grid-template-columns:1fr}.checkout-step{padding:8px 10px}.shipping-head{display:block}.quote-button{width:100%;margin-top:13px}.shipping-option .details{align-items:flex-start}.summary-item{font-size:14px}.mobile-checkout{display:block;position:fixed;z-index:30;left:10px;right:10px;bottom:10px;padding:14px;border:0;border-radius:10px;background:var(--red);color:#fff;font-weight:900;box-shadow:0 10px 34px #000}.mobile-checkout:disabled{opacity:.6}}
+    .back[type="button"]{padding:0;border:0;background:none;font:inherit;cursor:pointer}
   </style>
+  <script defer src="/_vercel/insights/script.js"></script>
+  <script defer src="/analytics.js?v=1"></script>
 </head>
 <body>
   <main class="wrap">
@@ -17,19 +22,23 @@
       <h1>Finalizar compra</h1>
       <p id="checkoutLead" class="lead">Completá los datos de entrega. Antes de pagar vas a ver el correo, el costo del envío y el plazo estimado para tu código postal.</p>
 
+      <div class="checkout-steps" aria-label="Pasos de la compra"><div class="checkout-step active"><span>1</span> Tus datos</div><div class="checkout-step"><span>2</span> Envío</div><div class="checkout-step"><span>3</span> Pago seguro</div></div>
+
       <div id="summary" class="summary">Cargando productos...</div>
 
       <form id="form">
-        <section class="section">
+        <section id="contactSection" class="section">
           <h2 class="section-title">👤 Datos de contacto</h2>
           <div class="grid">
             <label>Nombre y apellido *<input id="name" required maxlength="120" autocomplete="name"></label>
             <label>Email *<input id="email" type="email" required maxlength="160" autocomplete="email"></label>
             <label>Teléfono *<input id="phone" required maxlength="50" autocomplete="tel"></label>
           </div>
+          <button id="toDelivery" class="btn" type="button">CONTINUAR CON LA ENTREGA</button>
         </section>
 
-        <section class="section">
+        <section id="deliverySection" class="section" hidden>
+          <button id="editContact" class="back" type="button">← Editar datos de contacto</button>
           <h2 class="section-title">📍 Forma de entrega</h2>
           <div class="delivery-tabs">
             <label class="delivery-mode"><input type="radio" name="deliveryType" value="home" checked><span><b>A domicilio</b><br><small>Recibí el pedido en tu dirección</small></span></label>
@@ -75,14 +84,15 @@
           </div>
         </section>
 
-        <button id="submit" class="btn">CONTINUAR A MERCADO PAGO</button>
+        <button id="submit" class="btn" hidden>CONTINUAR A MERCADO PAGO</button>
         <div class="secure">🔒 El precio de los productos y del envío se verifican nuevamente en el servidor antes del pago.</div>
         <div id="error" class="error" role="alert"></div>
       </form>
     </section>
   </main>
+  <button id="mobileSubmit" class="mobile-checkout" type="button">CONTINUAR CON LA ENTREGA</button>
 
-  <script src="/carrito.js?v=7"></script>
+  <script src="/carrito.js?v=8"></script>
   <script>
     const money = value => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(Number(value || 0));
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -94,6 +104,34 @@
     let subtotal = 0;
     let shippingEnabled = false;
     let selectedShipping = null;
+
+    function setActiveStep(step) {
+      document.querySelectorAll('.checkout-step').forEach((element, index) => element.classList.toggle('active', index + 1 === step));
+    }
+
+    function showDeliveryStep() {
+      const fields = ['name', 'email', 'phone'].map(id => document.getElementById(id));
+      const invalid = fields.find(field => !field.checkValidity());
+      if (invalid) { invalid.reportValidity(); invalid.focus(); return; }
+      document.getElementById('contactSection').hidden = true;
+      document.getElementById('deliverySection').hidden = false;
+      document.getElementById('shippingSection').hidden = !shippingEnabled;
+      document.getElementById('submit').hidden = false;
+      document.getElementById('mobileSubmit').textContent = 'CONTINUAR A MERCADO PAGO';
+      setActiveStep(2);
+      document.querySelector('.checkout-steps').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.MitiToysAnalytics?.track('checkout_contact_completed');
+    }
+
+    function editContactStep() {
+      document.getElementById('contactSection').hidden = false;
+      document.getElementById('deliverySection').hidden = true;
+      document.getElementById('shippingSection').hidden = true;
+      document.getElementById('submit').hidden = true;
+      document.getElementById('mobileSubmit').textContent = 'CONTINUAR CON LA ENTREGA';
+      setActiveStep(1);
+      document.getElementById('name').focus();
+    }
 
     function provinceName() {
       const select = document.getElementById('province');
@@ -226,12 +264,14 @@
           const config = await shippingResponse.json();
           shippingEnabled = config.enabled === true;
         }
-        document.getElementById('shippingSection').hidden = !shippingEnabled;
+        document.getElementById('shippingSection').hidden = true;
         if (!shippingEnabled) document.getElementById('checkoutLead').textContent = 'Completá tus datos. Tu carrito completo se enviará en un único pedido a Mercado Pago.';
         renderSummary();
+        window.MitiToysAnalytics?.track('checkout_view', { items: checkoutItems.reduce((sum, item) => sum + item.qty, 0), value: subtotal });
       } catch (error) {
         summary.innerHTML = '<p class="error">' + esc(error.message || 'No se pudo cargar el pedido.') + '</p>';
         form.remove();
+        document.getElementById('mobileSubmit').hidden = true;
       }
     }
 
@@ -240,6 +280,9 @@
     document.getElementById('province').addEventListener('change', () => { if (shippingEnabled) invalidateShipping(); if (deliveryType() === 'branch') loadLocalities(); });
     document.getElementById('postal').addEventListener('input', () => { if (shippingEnabled && selectedShipping && deliveryType() === 'home') invalidateShipping(); });
     document.getElementById('locality').addEventListener('change', () => { if (shippingEnabled && selectedShipping) invalidateShipping(); });
+    document.getElementById('toDelivery').addEventListener('click', showDeliveryStep);
+    document.getElementById('editContact').addEventListener('click', editContactStep);
+    document.getElementById('mobileSubmit').addEventListener('click', () => document.getElementById('contactSection').hidden ? form.requestSubmit() : showDeliveryStep());
 
     form.addEventListener('submit', async event => {
       event.preventDefault();
@@ -253,6 +296,10 @@
       }
       button.disabled = true;
       button.textContent = '⏳ PREPARANDO PEDIDO...';
+      setActiveStep(3);
+      const mobileButton = document.getElementById('mobileSubmit');
+      mobileButton.disabled = true;
+      mobileButton.textContent = '⏳ PREPARANDO PEDIDO...';
       const province = document.getElementById('province');
       const customer = {
         name: document.getElementById('name').value.trim(),
@@ -271,6 +318,7 @@
         notes: document.getElementById('notes').value.trim()
       };
       try {
+        window.MitiToysAnalytics?.track('payment_started', { items: checkoutItems.reduce((sum, item) => sum + item.qty, 0), value: subtotal + Number(selectedShipping?.amount || 0), delivery_type: deliveryType() });
         const response = await fetch('/api/crear-preferencia-carrito', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -282,9 +330,13 @@
         location.href = data.init_point;
       } catch (requestError) {
         error.textContent = requestError.message || 'No se pudo iniciar el pago.';
+        window.MitiToysAnalytics?.track('payment_error', { message: error.textContent });
+        setActiveStep(2);
         if (/cotización/i.test(error.textContent)) invalidateShipping();
         button.disabled = false;
         button.textContent = 'CONTINUAR A MERCADO PAGO';
+        mobileButton.disabled = false;
+        mobileButton.textContent = 'CONTINUAR A MERCADO PAGO';
       }
     });
 
