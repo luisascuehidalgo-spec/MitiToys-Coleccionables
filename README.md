@@ -15,6 +15,8 @@ La tienda incorpora:
 - Cotización profesional de envíos por provincia y código postal mediante Envíopack.
 - Selección de correo, costo y plazo estimado antes de ingresar a Mercado Pago.
 - Validación del precio del envío en el servidor y cotizaciones con vencimiento.
+- Correos automáticos por Resend para pagos y cambios importantes del pedido.
+- Copia oculta de cada correo al buzón de MitiToys y respuestas dirigidas a `pedidos@mititoys.com`.
 
 ## Configuración de producción
 
@@ -25,6 +27,14 @@ Variables de entorno requeridas en Vercel:
 - `DATABASE_URL`
 - `ADMIN_PASSWORD`
 - `ADMIN_SESSION_SECRET`
+
+Para habilitar los correos automáticos también se requieren:
+
+- `RESEND_API_KEY`
+- `MITITOYS_FROM_EMAIL` (por ejemplo, `MitiToys <pedidos@mititoys.com>`)
+- `PUBLIC_SITE_URL` (por ejemplo, `https://mititoys.com`)
+- `MITITOYS_EMAIL_COPY` (opcional; si se omite, se usa la dirección del remitente)
+- `MITITOYS_REPLY_TO_EMAIL` (opcional; si se omite, se usa la dirección del remitente)
 
 Para habilitar las cotizaciones automáticas de envío también se requieren:
 

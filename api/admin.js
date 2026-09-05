@@ -216,9 +216,12 @@ module.exports = async (req,res)=>{
       if(!before.length) return res.status(404).json({error:'Pedido no encontrado.'});
       const shippingStatus=status==='shipped'?'in_transit':status==='delivered'?'delivered':status==='processing'?'preparing':'not_shipped';
       const rows=await sql`UPDATE orders SET status=${status},shipping_status=${shippingStatus},shipping_recipient=${recipient},shipping_address=${address||null},shipping_street=${street},shipping_number=${number},shipping_floor=${floor},shipping_unit=${unit},shipping_city=${city},shipping_postal_code=${postal},shipping_phone=${phone},shipping_notes=${notes},shipping_carrier=${carrier},tracking_number=${tracking},updated_at=NOW() WHERE id=${id} RETURNING *`;
-      if(before[0].status!==status) await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'admin.status_changed',${before[0].status},${status},${JSON.stringify({tracking_number:tracking,shipping_carrier:carrier})}::jsonb)`;
-      if(status==='shipped') await queueAndSendOrderNotification(sql,id,'shipment_created');
-      if(status==='delivered'){await ensureReviewInvites(sql,id);await queueAndSendOrderNotification(sql,id,'review_invite');}
+      if(before[0].status!==status){
+        await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'admin.status_changed',${before[0].status},${status},${JSON.stringify({tracking_number:tracking,shipping_carrier:carrier})}::jsonb)`;
+        const notificationType={approved:'payment_approved',processing:'order_processing',shipped:'shipment_created',cancelled:'order_cancelled',refunded:'order_refunded'}[status];
+        if(notificationType) await queueAndSendOrderNotification(sql,id,notificationType);
+        if(status==='delivered'){await ensureReviewInvites(sql,id);await queueAndSendOrderNotification(sql,id,'review_invite');}
+      }
       return res.status(200).json({order:rows[0]});
     }
 
