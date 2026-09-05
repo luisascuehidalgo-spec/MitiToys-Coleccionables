@@ -1,5 +1,5 @@
 (() => {
-  const CACHE_KEY = 'mititoys_catalog_cache_v2';
+  const CACHE_KEY = 'mititoys_catalog_cache_v3';
   const CACHE_TTL = 15 * 60 * 1000;
   const FALLBACK_3431 = {
     id: '3431',
@@ -125,7 +125,7 @@
       : 'Sin stock';
     const title = String(product.title || `Producto COD ${product.id}`);
     const description = shortDescription(product.description);
-    const thumbs = images.map((url, imageIndex) => `<div class="thumbwrap ${imageIndex === 0 ? 'active' : ''}" data-index="${imageIndex}"><img class="thumb" src="${esc(url)}" alt="${esc(title)} foto ${imageIndex + 1}" loading="lazy" decoding="async"><img class="thumbwm" src="${logo}" alt="" loading="lazy" decoding="async"></div>`).join('');
+    const thumbs = images.map((url, imageIndex) => `<button type="button" class="thumbwrap ${imageIndex === 0 ? 'active' : ''}" data-index="${imageIndex}" aria-label="Ver foto ${imageIndex + 1} de ${esc(title)}"><img class="thumb" src="${esc(url)}" alt="" loading="lazy" decoding="async"><img class="thumbwm" src="${logo}" alt="" loading="lazy" decoding="async"></button>`).join('');
 
     const card = document.createElement('article');
     card.className = 'card catalog-card dynamic-product';
@@ -135,7 +135,7 @@
     card.dataset.price = String(Number(product.price || 0));
     card.dataset.created = String(Date.parse(product.created_at || '') || 0);
     card.dataset.originalOrder = String(index);
-    card.innerHTML = `<div class="gallery"><div class="main-photo"><span class="badge">COD ${esc(product.id)}</span><span class="stock-chip ${available ? '' : 'out'}">${esc(stockText)}</span><img class="mainimg" src="${esc(images[0])}" alt="${esc(title)}" loading="lazy" decoding="async"><img class="watermark" src="${logo}" alt="Logo Mititoys coleccionables" loading="lazy" decoding="async"></div><div class="thumbs">${thumbs}</div></div><div class="body"><h3>${esc(title)}</h3><p class="desc">${esc(description)}</p><div class="specs"><span>📦 ${esc(stockText)}</span></div><div class="price">${money(product.price)} ARS</div><div class="card-actions"><a class="catalog-detail" href="/producto.html?id=${encodeURIComponent(product.id)}">VER PRODUCTO</a><button class="paybtn cart-add" type="button" ${available ? '' : 'disabled'}>${available ? '🛒 AGREGAR AL CARRITO' : 'SIN STOCK'}</button><button class="paybtn pay-now" type="button" ${available ? '' : 'disabled'}>COMPRAR AHORA</button></div><a class="catalog-whatsapp" target="_blank" rel="noopener" href="https://wa.me/541133466187?text=${encodeURIComponent(`Hola, quiero consultar por la figura ${title} COD ${product.id}`)}">Consultar por WhatsApp</a></div>`;
+    card.innerHTML = `<div class="gallery"><div class="main-photo"><span class="badge">COD ${esc(product.id)}</span><span class="stock-chip ${available ? '' : 'out'}">${esc(stockText)}</span><img class="mainimg" src="${esc(images[0])}" alt="${esc(title)}" loading="lazy" decoding="async" width="600" height="600"><img class="watermark" src="${logo}" alt="" loading="lazy" decoding="async" width="88" height="50"></div><div class="thumbs">${thumbs}</div></div><div class="body"><h3>${esc(title)}</h3><p class="desc">${esc(description)}</p><div class="specs"><span>📦 ${esc(stockText)}</span></div><div class="price">${money(product.price)} ARS</div><div class="card-actions"><a class="catalog-detail" href="/producto.html?id=${encodeURIComponent(product.id)}">VER PRODUCTO</a><button class="paybtn cart-add" type="button" ${available ? '' : 'disabled'}>${available ? '🛒 AGREGAR AL CARRITO' : 'SIN STOCK'}</button></div></div>`;
 
     card.querySelectorAll('.thumbwrap').forEach(thumb => {
       thumb.addEventListener('click', () => {
@@ -154,13 +154,9 @@
       });
     }
 
-    const payButton = card.querySelector('.pay-now');
-    if (payButton && available) {
-      payButton.addEventListener('click', () => {
-        if (window.pagar) window.pagar(String(product.id), payButton);
-        else window.location.href = '/checkout.html?cart=1';
-      });
-    }
+    card.querySelector('.catalog-detail')?.addEventListener('click', () => {
+      window.MitiToysAnalytics?.track('product_select', { product_id: String(product.id), source: 'catalog' });
+    });
 
     grid.appendChild(card);
   }
@@ -208,8 +204,14 @@
       grid.hidden = total === 0;
     };
 
-    search.addEventListener('input', update);
-    sort.addEventListener('change', update);
+    search.addEventListener('input', () => {
+      update();
+      if (search.value.trim().length >= 2) window.MitiToysAnalytics?.track('catalog_search', { query: search.value.trim() });
+    });
+    sort.addEventListener('change', () => {
+      update();
+      window.MitiToysAnalytics?.track('catalog_sort', { order: sort.value });
+    });
     return update;
   }
 
@@ -218,12 +220,19 @@
     const grid = document.querySelector('#catalogo .grid');
     if (!grid) return;
 
-    prepareExistingCards(grid);
-    const refreshControls = setupCatalogControls(grid);
-    refreshControls();
+    grid.innerHTML = '<div class="catalog-skeleton" aria-hidden="true"></div><div class="catalog-skeleton" aria-hidden="true"></div><div class="catalog-skeleton" aria-hidden="true"></div>';
+    grid.classList.add('catalog-ready', 'catalog-loading');
+    grid.setAttribute('aria-busy', 'true');
+    const count = document.getElementById('catalogCount');
+    if (count) count.textContent = 'Cargando catálogo…';
+    let refreshControls = null;
+    const refresh = () => {
+      if (!refreshControls) refreshControls = setupCatalogControls(grid);
+      refreshControls();
+    };
 
     const cachedProducts = readCache();
-    if (cachedProducts.length && renderProducts(grid, cachedProducts)) refreshControls();
+    if (cachedProducts.length && renderProducts(grid, cachedProducts)) refresh();
 
     try {
       const response = await fetch(`/api/productos?cb=${Date.now()}`, {
@@ -236,11 +245,16 @@
       if (!products.length) throw new Error('Catálogo sin productos');
       saveCache(products);
       renderProducts(grid, products);
-      refreshControls();
+      refresh();
+      window.MitiToysAnalytics?.track('catalog_view', { products: products.length });
     } catch (error) {
       console.error('catalogo-dinamico api:', error);
+      if (!grid.querySelector('.catalog-card')) grid.innerHTML = '';
       if (!grid.querySelector('[data-product-id="3431"]')) renderProduct(grid, FALLBACK_3431, grid.children.length);
-      refreshControls();
+      refresh();
+    } finally {
+      grid.classList.remove('catalog-loading');
+      grid.removeAttribute('aria-busy');
     }
   }
 

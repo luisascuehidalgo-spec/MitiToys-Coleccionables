@@ -47,12 +47,14 @@
 
       save(cart);
       updateBadges();
+      window.MitiToysAnalytics?.track('add_to_cart', { product_id: key, quantity: amount });
       return cart;
     },
     remove(id) {
       const cart = read().filter(x => x.id !== String(id));
       save(cart);
       updateBadges();
+      window.MitiToysAnalytics?.track('remove_from_cart', { product_id: String(id) });
       return cart;
     },
     setQty(id, qty) {
@@ -76,6 +78,7 @@
 
   window.agregarAlCarrito = (id, button) => {
     window.MitiToysCart.add(id, 1);
+    window.MitiToysAnalytics?.track('checkout_started', { product_id: String(id), source: 'buy_now' });
 
     if (button) {
       const old = button.textContent;
