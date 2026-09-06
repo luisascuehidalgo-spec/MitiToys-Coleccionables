@@ -11,13 +11,26 @@ module.exports = async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(405).send('Método no permitido.');
   try {
     const sql = getDb();
-    // Only current uploaded catalog photos; never use legacy URLs or fallback products.
+    // Keep old uploaded photos and include new Cloudinary uploads from the admin.
     const rows = await sql`SELECT p.id,p.title,i.id AS image_id FROM products p JOIN product_images i ON i.product_id=p.id WHERE p.active=true ORDER BY p.id,i.sort_order,i.id`;
     const grouped = new Map();
     for (const row of rows) {
       const id = String(row.id);
       if (!grouped.has(id)) grouped.set(id, {id, title:row.title, images:[]});
       grouped.get(id).images.push('https://mititoys.com/api/product-image?id=' + encodeURIComponent(row.image_id));
+    }
+    const cloudProducts = await sql`SELECT id,title,images FROM products WHERE active=true AND jsonb_array_length(images)>0 ORDER BY id`;
+    for (const product of cloudProducts) {
+      const images = (product.images || []).filter(value => {
+        try {
+          const url = new URL(value);
+          return url.protocol === 'https:' && url.hostname === 'res.cloudinary.com' && url.pathname.includes('/mititoys/products/');
+        } catch { return false; }
+      });
+      if (!images.length) continue;
+      const id = String(product.id);
+      if (!grouped.has(id)) grouped.set(id, { id, title: product.title, images: [] });
+      grouped.get(id).images.push(...images);
     }
     const rank = id => priority.includes(id) ? priority.indexOf(id) : priority.length;
     const products = [...grouped.values()].sort((a,b) => rank(a.id)-rank(b.id) || a.title.localeCompare(b.title,'es'));

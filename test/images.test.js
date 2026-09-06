@@ -8,6 +8,7 @@ let query;
 require('../lib/db').getDb = () => query;
 const imageHandler = require('../api/admin-image');
 const productHandler = require('../api/admin-product');
+const announcementHandler = require('../api/anuncio');
 const { uploadImage } = require('../lib/cloudinary');
 const png = Buffer.from('89504e470d0a1a0a0000000d49484452','hex');
 const url = 'https://res.cloudinary.com/test-cloud/image/upload/v1/mititoys/products/test.png';
@@ -147,4 +148,13 @@ test('admin edit sends old URL snapshot and uploads selected image',async()=>{
   get('files-test').files=[{size:100,type:'image/png',name:'test.png'}];
   await vm.runInContext("saveProduct('test')",context);
   assert.ok(edited&&uploaded);assert.equal(get('ps-test').textContent,'Guardado');
+});
+
+test('promotional gallery includes Cloudinary uploads and preserves binary photo URLs',async()=>{
+  query=async s=>s.join('').includes('JOIN product_images')?[{id:'old',title:'Old',image_id:12}]:[{id:'new',title:'New',images:[url,'https://legacy.example/a.jpg']}];
+  const res={status(code){this.code=code;return this},setHeader(){},send(body){this.body=body;return this}};
+  await announcementHandler({method:'GET'},res);
+  assert.equal(res.code,200);assert.ok(res.body.includes(url));
+  assert.ok(res.body.includes('/api/product-image?id=12'));
+  assert.ok(!res.body.includes('legacy.example'));
 });
