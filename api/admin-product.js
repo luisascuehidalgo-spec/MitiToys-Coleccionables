@@ -61,10 +61,14 @@ module.exports = async (req, res) => {
       const images = parseImages(req.body?.images);
       const shipping = logistics(req.body);
       if (!id || !title || !Number.isInteger(stock) || stock < 0 || !Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Datos de producto inválidos.' });
-      const current = await sql`SELECT stock_quantity FROM products WHERE id=${id}`;
+      const current = await sql`SELECT stock_quantity,images FROM products WHERE id=${id}`;
       if (!current.length) return res.status(404).json({ error: 'Producto no encontrado.' });
+      const originalImages = req.body?.original_images ?? current[0].images ?? [];
+      const uploaded = await sql`SELECT COUNT(*)::int AS count FROM product_images WHERE product_id=${id}`;
+      if (images.length + Number(uploaded[0]?.count || 0) > 8) return res.status(400).json({ error: 'Este producto supera el máximo de 8 fotos.' });
       const delta = stock - Number(current[0].stock_quantity);
-      const rows = await sql`UPDATE products SET title=${title},description=${description},images=${JSON.stringify(images)}::jsonb,stock_quantity=${stock},stock_managed=${managed},active=${active},price=${price},weight_kg=${shipping.weight_kg},package_length_cm=${shipping.package_length_cm},package_width_cm=${shipping.package_width_cm},package_height_cm=${shipping.package_height_cm},updated_at=NOW() WHERE id=${id} RETURNING *`;
+      const rows = await sql`UPDATE products SET title=${title},description=${description},images=${JSON.stringify(images)}::jsonb,stock_quantity=${stock},stock_managed=${managed},active=${active},price=${price},weight_kg=${shipping.weight_kg},package_length_cm=${shipping.package_length_cm},package_width_cm=${shipping.package_width_cm},package_height_cm=${shipping.package_height_cm},updated_at=NOW() WHERE id=${id} AND COALESCE(images,'[]'::jsonb)=${JSON.stringify(originalImages)}::jsonb RETURNING *`;
+      if (!rows.length) return res.status(409).json({ error: 'Las fotos cambiaron desde que abriste el panel. Actualizá antes de guardar para conservarlas.' });
       if (delta !== 0) await sql`INSERT INTO inventory_movements(product_id,movement_type,quantity,reason) VALUES(${id},'adjustment',${delta},'Ajuste desde panel de administración')`;
       return res.status(200).json({ product: rows[0] });
     }

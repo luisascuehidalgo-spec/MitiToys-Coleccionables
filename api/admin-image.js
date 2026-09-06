@@ -1,7 +1,6 @@
 const { getDb } = require('../lib/db');
 const { verify } = require('./admin-auth');
-
-module.exports.config = { api: { bodyParser: false } };
+const { configuration, uploadImage } = require('../lib/cloudinary');
 
 const MAX_BYTES = 4 * 1024 * 1024;
 const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -18,7 +17,6 @@ function readBody(req) {
       total += chunk.length;
       if (total > MAX_BYTES) {
         reject(new Error('IMAGE_TOO_LARGE'));
-        req.destroy();
         return;
       }
       chunks.push(chunk);
@@ -30,14 +28,20 @@ function readBody(req) {
 
 module.exports = async (req, res) => {
   if (!verify(req)) return res.status(401).json({ error: 'No autorizado.' });
-  const sql = getDb();
   try {
+    if (req.method === 'GET') {
+      configuration();
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(200).json({ ready: true });
+    }
+    const sql = getDb();
     if (req.method === 'POST') {
       const productId = clean(req.query?.productId, 50);
       const mime = clean(req.headers['content-type'], 100).split(';')[0].toLowerCase();
       const filename = clean(req.headers['x-filename'], 180) || 'imagen';
       if (!productId) return res.status(400).json({ error: 'Falta el producto.' });
       if (!ALLOWED.has(mime)) return res.status(400).json({ error: 'Formato no permitido. Usá JPG, PNG o WEBP.' });
+      configuration();
       const product = await sql`SELECT id FROM products WHERE id=${productId}`;
       if (!product.length) return res.status(404).json({ error: 'Producto no encontrado.' });
       const counts = await sql`SELECT (SELECT COUNT(*) FROM product_images WHERE product_id=${productId})::int AS uploaded_count, (SELECT COUNT(*) FROM products WHERE id=${productId} AND jsonb_typeof(images)='array')::int AS legacy_holder`;
@@ -47,9 +51,21 @@ module.exports = async (req, res) => {
       if (uploadedCount + legacyCount >= 8) return res.status(400).json({ error: 'Este producto ya tiene el máximo de 8 fotos.' });
       const body = await readBody(req);
       if (!body.length) return res.status(400).json({ error: 'La imagen está vacía.' });
-      const rows = await sql`INSERT INTO product_images(product_id,filename,mime_type,image_data,sort_order) VALUES(${productId},${filename},${mime},${body},${uploadedCount}) RETURNING id,product_id,filename,mime_type,sort_order,created_at`;
-      const image = rows[0];
-      return res.status(201).json({ image: { id: image.id, url: `/api/product-image?id=${image.id}`, filename: image.filename, mime_type: image.mime_type, sort_order: image.sort_order } });
+      const matches = mime === 'image/jpeg' ? body.subarray(0,3).equals(Buffer.from([255,216,255]))
+        : mime === 'image/png' ? body.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
+        : body.toString('ascii',0,4) === 'RIFF' && body.toString('ascii',8,12) === 'WEBP';
+      if (!matches) return res.status(400).json({ error: 'El contenido no corresponde a una imagen JPG, PNG o WEBP.' });
+      const url = await uploadImage(body, mime);
+      // Atomic append preserves existing URLs and rechecks the limit after upload.
+      // The binary table is read only for counting old photos; new bytes never enter Neon.
+      const rows = await sql`
+        UPDATE products SET images=COALESCE(images,'[]'::jsonb) || ${JSON.stringify([url])}::jsonb,updated_at=NOW()
+        WHERE id=${productId} AND COALESCE(jsonb_array_length(images),0) +
+          (SELECT COUNT(*) FROM product_images WHERE product_id=${productId}) < 8
+        RETURNING id
+      `;
+      if (!rows.length) return res.status(409).json({ error: 'El producto cambió o ya tiene 8 fotos. Actualizá el panel.' });
+      return res.status(201).json({ image: { url, filename, mime_type: mime } });
     }
     if (req.method === 'DELETE') {
       const id = Number(req.query?.id);
@@ -59,8 +75,11 @@ module.exports = async (req, res) => {
     }
     return res.status(405).json({ error: 'Método no permitido.' });
   } catch (error) {
-    console.error('admin image error:', error);
+    console.error('admin image error:', error.status || 'UPLOAD_FAILED');
     if (error.message === 'IMAGE_TOO_LARGE') return res.status(413).json({ error: 'La imagen supera 4 MB.' });
-    return res.status(500).json({ error: 'No se pudo guardar la imagen.' });
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    return res.status(500).json({ error: 'No se pudo guardar la imagen. Actualizá el panel antes de reintentar.' });
   }
 };
+
+module.exports.config = { api: { bodyParser: false } };

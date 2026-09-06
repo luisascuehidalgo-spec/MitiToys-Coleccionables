@@ -28,6 +28,27 @@ Variables de entorno requeridas en Vercel:
 - `ADMIN_PASSWORD`
 - `ADMIN_SESSION_SECRET`
 
+Para las fotos nuevas del administrador:
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+
+Configurarlas en Production antes del despliegue. El administrador conserva el flujo
+Elegir archivos → hasta 8 fotos → Crear producto (JPG, PNG o WEBP, máximo 4 MB cada una).
+El servidor autentica al administrador, sube cada archivo a Cloudinary y agrega su
+URL HTTPS a `products.images`. No se insertan nuevos binarios en `product_images`.
+No se requiere migración de base de datos: las fotos binarias antiguas y su endpoint
+`/api/product-image` permanecen intactos. Esas fotos todavía consumen transferencia
+de Neon; moverlas requiere una autorización independiente.
+
+Si falla una carga, el panel indica que el producto ya fue guardado y permite
+continuar desde su edición agregando solo las fotos faltantes. Una carga exitosa en
+Cloudinary seguida de un error de base de datos puede dejar un archivo sin asociar;
+no se eliminan automáticamente archivos del proveedor. Nunca registrar secretos ni
+respuestas completas del proveedor. `node --test` verifica creación, edición,
+límites, conservación de URLs, conflictos y fallos con servicios simulados.
+
 Para habilitar los correos automáticos también se requieren:
 
 - `RESEND_API_KEY`
