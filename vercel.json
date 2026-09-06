@@ -3,6 +3,10 @@
     {
       "source": "/sitemap.xml",
       "destination": "/api/productos?sitemap=1"
+    },
+    {
+      "source": "/anuncio",
+      "destination": "/api/anuncio"
     }
   ],
   "crons": [
