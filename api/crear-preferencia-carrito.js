@@ -46,10 +46,8 @@ module.exports = async (req, res) => {
       if (!Number.isFinite(price) || price < 0) throw new Error('Precio de producto inválido.');
 
       let pictureUrl = PRODUCTOS[requested.id]?.picture_url || '';
-      const legacyImages = Array.isArray(product.images) ? product.images : [];
-      if (legacyImages[0]) pictureUrl = String(legacyImages[0]);
-      const uploaded = await sql`SELECT id FROM product_images WHERE product_id=${requested.id} ORDER BY sort_order,id LIMIT 1`;
-      if (uploaded.length) pictureUrl = `${origin}/api/product-image?id=${uploaded[0].id}`;
+      const productImages = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
+      if (productImages[0]) pictureUrl = String(productImages[0]);
 
       items.push({
         id: requested.id,

@@ -27,6 +27,12 @@ test('home, ficha, carrito y checkout no dependen de imágenes binarias de Neon'
   assert.match(read('checkout.html'), /fetch\('\/api\/productos'\)/);
 });
 
+test('checkout server no consulta ni publica imágenes binarias de Neon', () => {
+  const checkout = read('api/crear-preferencia-carrito.js');
+  assert.doesNotMatch(checkout, /product_images/);
+  assert.doesNotMatch(checkout, /\/api\/product-image/);
+});
+
 test('API pública de productos no consulta product_images y usa caché CDN corta', () => {
   const products = read('api/productos.js');
   assert.doesNotMatch(products, /FROM product_images|JOIN product_images/);
