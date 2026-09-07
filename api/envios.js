@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStock } = require('../lib/inventory');
+const { orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');
 const { findPaymentsByExternalReference } = require('../lib/payments');
 const {
   shippingEnabled, normalizePostalCode, normalizeProvinceCode, normalizeCart, cartHash,
@@ -22,7 +23,7 @@ function shipmentState(details, tracking) {
 }
 
 async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
-  const orders = await sql`SELECT id,tracking_number,status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1`;
+  const orders = await sql`SELECT id,tracking_number,status,payment_status,shipping_status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1`;
   if (!orders.length) return null;
   const details = await getShipment(shipmentId);
   let tracking = [];
@@ -31,6 +32,8 @@ async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
   }
   const trackingNumber = String(details?.tracking_number || details?.numero_tracking || orders[0].tracking_number || '').trim() || null;
   const state = shipmentState(details, tracking);
+  state.order = orderStatusFromShipping(orders[0], state.order);
+  state.shipping = shippingStatusFromProvider(orders[0].shipping_status, state.shipping);
   const labelReady = String(details?.estado || '').toUpperCase() === 'P';
   await sql`
     UPDATE orders SET
@@ -45,7 +48,7 @@ async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
     WHERE id=${orders[0].id}
   `;
   await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${orders[0].id},'enviopack.synced',${orders[0].status},${state.order},${JSON.stringify({ shipment_id: String(shipmentId), provider_state: details?.estado || null, tracking_number: trackingNumber, tracking })}::jsonb)`;
-  if (trackingNumber && trackingNumber !== orders[0].tracking_number) await queueAndSendOrderNotification(sql, orders[0].id, 'shipment_created');
+  if (trackingNumber && trackingNumber !== orders[0].tracking_number && orders[0].payment_status === 'approved') await queueAndSendOrderNotification(sql, orders[0].id, 'shipment_created');
   if (state.order === 'delivered') {
     await ensureReviewInvites(sql, orders[0].id);
     await queueAndSendOrderNotification(sql, orders[0].id, 'review_invite');

@@ -54,7 +54,7 @@ test('búsqueda de pagos usa external_reference y token solo en Authorization', 
   assert.equal(results.length, 1);
 });
 
-test('cancelación manual invalida la preferencia en Mercado Pago antes de liberar stock', async t => {
+test('cancelación manual invalida la preferencia y usa liberación consciente del despacho', async t => {
   const previousToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
   const previousFetch = global.fetch;
   process.env.MERCADOPAGO_ACCESS_TOKEN = 'secret-test-token';
@@ -87,7 +87,8 @@ test('cancelación manual invalida la preferencia en Mercado Pago antes de liber
   const admin = read('api/admin.js');
   assert.match(admin, /adminStatusError/);
   assert.match(admin, /await expirePreference\(previous\.preference_id\)/);
-  assert.match(admin, /await releaseReservedStock\(sql,id/);
+  assert.match(admin, /await releaseReservedStockIfUnshipped\(sql,id/);
+  assert.doesNotMatch(admin, /await releaseReservedStock\(sql,id/);
 });
 
 test('liberación de inventario solo suma stock cuando se inserta el primer release', async () => {
@@ -122,7 +123,7 @@ test('cron solo vence pedidos sin payment_id y verifica Mercado Pago antes de li
 
 test('webhook reutiliza release idempotente y no imprime cuerpos completos del proveedor', () => {
   const webhook = read('api/webhook-mercadopago.js');
-  assert.match(webhook, /releaseReservedStock/);
+  assert.match(webhook, /releaseReservedStockIfUnshipped/);
   assert.doesNotMatch(webhook, /UPDATE products SET stock_quantity=stock_quantity\+/);
   assert.doesNotMatch(webhook, /console\.error\('Error consultando pago en Mercado Pago:',payment\)/);
   assert.doesNotMatch(webhook, /console\.error\('Webhook Mercado Pago error:',error\)/);

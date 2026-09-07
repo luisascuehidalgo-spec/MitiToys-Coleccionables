@@ -1,6 +1,7 @@
 const { getDb } = require('../lib/db');
 const { ensureReviewInvites } = require('../lib/notifications');
 const { searchParams } = require('../lib/request-url');
+const { publicOrderStatus } = require('../lib/order-state');
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
@@ -23,6 +24,7 @@ module.exports = async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'No encontramos un pedido que coincida con ese número y email.' });
 
     const order = rows[0];
+    order.status = publicOrderStatus(order);
     if (order.status === 'delivered') await ensureReviewInvites(sql, order.id);
     const [items, events, reviewInvites] = await Promise.all([
       sql`SELECT product_id,product_title,quantity,unit_price,total_amount FROM order_items WHERE order_id=${order.id} ORDER BY id`,

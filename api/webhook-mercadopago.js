@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
-const { releaseReservedStock } = require('../lib/inventory');
+const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { orderStatusFromPayment } = require('../lib/order-state');
 const { queueAndSendOrderNotification } = require('../lib/notifications');
 
@@ -102,8 +102,10 @@ module.exports = async (req, res) => {
         if (approvedMismatch) {
           await sql`
             UPDATE orders SET
-              customer_id=${customerId},payment_id=${String(payment.id)},
-              payment_status=${payment.status || null},payment_status_detail=${payment.status_detail || null},
+              customer_id=${customerId},
+              payment_id=${String(payment.id)},
+              payment_status='validation_failed',
+              payment_status_detail='amount_or_currency_mismatch',
               updated_at=NOW()
             WHERE id=${order.id}
           `;
@@ -111,7 +113,16 @@ module.exports = async (req, res) => {
             INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
             VALUES(
               ${order.id},'payment.validation_failed',${oldStatus},${oldStatus},
-              ${JSON.stringify({ payment_id: payment.id, status: payment.status, reason: 'amount_or_currency_mismatch' })}::jsonb
+              ${JSON.stringify({
+                payment_id: payment.id,
+                provider_status: payment.status,
+                provider_status_detail: payment.status_detail || null,
+                transaction_amount: payment.transaction_amount,
+                currency_id: payment.currency_id || null,
+                expected_amount: Number(order.total_amount),
+                expected_currency: order.currency || 'ARS',
+                reason: 'amount_or_currency_mismatch'
+              })}::jsonb
             )
           `;
           console.error('Mercado Pago payment validation failed:', 'order_id=' + String(order.id));
@@ -127,8 +138,9 @@ module.exports = async (req, res) => {
           WHERE id=${order.id}
         `;
 
+        let stockRelease = null;
         if (newStatus === 'cancelled' || newStatus === 'refunded') {
-          await releaseReservedStock(
+          stockRelease = await releaseReservedStockIfUnshipped(
             sql,
             order.id,
             newStatus === 'refunded' ? 'Liberación por reembolso' : 'Liberación por rechazo/cancelación'
@@ -144,7 +156,8 @@ module.exports = async (req, res) => {
               status: payment.status,
               status_detail: payment.status_detail,
               transaction_amount: payment.transaction_amount,
-              currency_id: payment.currency_id || null
+              currency_id: payment.currency_id || null,
+              stock_release: stockRelease
             })}::jsonb
           )
         `;
