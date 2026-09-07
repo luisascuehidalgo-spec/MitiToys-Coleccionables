@@ -23,25 +23,29 @@ jobs:
           from pathlib import Path
           path = Path('lib/shipping.js')
           text = path.read_text()
-          old = """  if (!response.ok) {
-    const providerMessage = String(data?.mensaje || data?.message || data?.error || '').slice(0, 350);
-    throw Object.assign(new Error(providerMessage || 'Envíopack no pudo procesar la solicitud.'), {
-      code: response.status === 402 || /saldo|fondos|balance/i.test(providerMessage) ? 'INSUFFICIENT_SHIPPING_BALANCE' : 'SHIPPING_PROVIDER_ERROR',
-      providerStatus: response.status
-    });
-  }
-"""
-          new = """  if (!response.ok) {
-    const providerMessage = String(data?.mensaje || data?.message || data?.error || '').slice(0, 350);
-    const code = response.status === 402 || /saldo|fondos|balance/i.test(providerMessage)
-      ? 'INSUFFICIENT_SHIPPING_BALANCE'
-      : 'SHIPPING_PROVIDER_ERROR';
-    const safeMessage = code === 'INSUFFICIENT_SHIPPING_BALANCE'
-      ? 'Envíopack informó saldo insuficiente para completar la operación.'
-      : 'Envíopack no pudo procesar la solicitud.';
-    throw Object.assign(new Error(safeMessage), { code, providerStatus: response.status });
-  }
-"""
+          old = "\n".join([
+              "  if (!response.ok) {",
+              "    const providerMessage = String(data?.mensaje || data?.message || data?.error || '').slice(0, 350);",
+              "    throw Object.assign(new Error(providerMessage || 'Envíopack no pudo procesar la solicitud.'), {",
+              "      code: response.status === 402 || /saldo|fondos|balance/i.test(providerMessage) ? 'INSUFFICIENT_SHIPPING_BALANCE' : 'SHIPPING_PROVIDER_ERROR',",
+              "      providerStatus: response.status",
+              "    });",
+              "  }",
+              ""
+          ])
+          new = "\n".join([
+              "  if (!response.ok) {",
+              "    const providerMessage = String(data?.mensaje || data?.message || data?.error || '').slice(0, 350);",
+              "    const code = response.status === 402 || /saldo|fondos|balance/i.test(providerMessage)",
+              "      ? 'INSUFFICIENT_SHIPPING_BALANCE'",
+              "      : 'SHIPPING_PROVIDER_ERROR';",
+              "    const safeMessage = code === 'INSUFFICIENT_SHIPPING_BALANCE'",
+              "      ? 'Envíopack informó saldo insuficiente para completar la operación.'",
+              "      : 'Envíopack no pudo procesar la solicitud.';",
+              "    throw Object.assign(new Error(safeMessage), { code, providerStatus: response.status });",
+              "  }",
+              ""
+          ])
           if old not in text:
               raise SystemExit('Expected Enviopack error block not found')
           path.write_text(text.replace(old, new))
