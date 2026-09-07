@@ -11,7 +11,7 @@ function source(file) {
 }
 
 test('los logs de Enviopack no imprimen secretos, cuerpos ni errores completos', () => {
-  const forbidden = /process\.env|access_token|secret|authorization|cookie|headers|,\s*(?:data|validation|error)\s*\)|error\.message/i;
+  const forbidden = /process\.env|access_token|access-token|refresh_token|refresh-token|api[-_]?key|secret(?:[-_]?key)?|authorization|bearer|cookie|headers|,\s*(?:data|validation|error)\s*\)|error\.message/i;
   const violations = [];
   for (const file of PROVIDER_FILES) {
     source(file).split(/\r?\n/).forEach((line, index) => {
@@ -24,7 +24,7 @@ test('los logs de Enviopack no imprimen secretos, cuerpos ni errores completos',
 });
 
 test('errores de autenticación y cotización no filtran contenido sensible al log', async t => {
-  const markers = ['log-secret-marker', 'auth-token-marker', 'test-secret-key', 'test-api-key'];
+  const markers = ['log-secret-marker', 'auth-token-marker', 'auth-refresh-marker', 'test-secret-key', 'test-api-key'];
   const previousFetch = global.fetch;
   const previousError = console.error;
   const previousWarn = console.warn;
@@ -54,7 +54,7 @@ test('errores de autenticación y cotización no filtran contenido sensible al l
   global.fetch = async url => {
     if (stage === 'auth') {
       stage = 'validation-fail';
-      return { ok: true, status: 200, json: async () => ({ access_token: 'auth-token-marker' }) };
+      return { ok: true, status: 200, json: async () => ({ access_token: 'auth-token-marker', refresh_token: 'auth-refresh-marker' }) };
     }
     if (stage === 'validation-fail') {
       stage = 'validation-ok';
@@ -63,6 +63,7 @@ test('errores de autenticación y cotización no filtran contenido sensible al l
         status: 502,
         json: async () => ({
           access_token: 'log-secret-marker',
+          refresh_token: 'log-secret-marker',
           secret: 'log-secret-marker',
           authorization: 'Bearer log-secret-marker',
           message: 'log-secret-marker'
@@ -78,6 +79,7 @@ test('errores de autenticación y cotización no filtran contenido sensible al l
       status: 503,
       json: async () => ({
         access_token: 'log-secret-marker',
+        refresh_token: 'log-secret-marker',
         secret: 'log-secret-marker',
         authorization: 'Bearer log-secret-marker',
         message: 'log-secret-marker'
@@ -123,13 +125,14 @@ test('los errores JSON de Enviopack no propagan el body del proveedor', async t 
   let call = 0;
   global.fetch = async () => {
     call += 1;
-    if (call === 1) return { ok: true, status: 200, json: async () => ({ access_token: 'test-token' }) };
+    if (call === 1) return { ok: true, status: 200, json: async () => ({ access_token: 'test-token', refresh_token: 'test-refresh-token' }) };
     return {
       ok: false,
       status: 500,
       json: async () => ({
         message: marker,
         access_token: marker,
+        refresh_token: marker,
         authorization: `Bearer ${marker}`
       })
     };
@@ -170,7 +173,7 @@ test('saldo insuficiente se clasifica sin copiar el mensaje del proveedor', asyn
   let call = 0;
   global.fetch = async () => {
     call += 1;
-    if (call === 1) return { ok: true, status: 200, json: async () => ({ access_token: 'test-token' }) };
+    if (call === 1) return { ok: true, status: 200, json: async () => ({ access_token: 'test-token', refresh_token: 'test-refresh-token' }) };
     return { ok: false, status: 402, json: async () => ({ mensaje: `Saldo insuficiente ${marker}` }) };
   };
 
