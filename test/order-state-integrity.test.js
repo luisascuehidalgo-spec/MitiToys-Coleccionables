@@ -138,11 +138,22 @@ test('API de seguimiento aplica publicOrderStatus y no loguea el error completo'
   assert.doesNotMatch(statusApi, /console\.error\('estado-pedido error:', error\)/);
 });
 
-test('generación de Enviopack reclama el pedido solo si el pago sigue aprobado', () => {
+test('generación de Enviopack reclama y revalida el pago antes de confirmar despacho', () => {
   const admin = read('api/admin.js');
   assert.match(admin, /WHERE id=\$\{id\} AND payment_status='approved' AND enviopack_shipment_id IS NULL/);
-  assert.match(admin, /orderStatusFromShippingEvent\(order, state\.order\)/);
+  assert.match(admin, /const paymentGuard = await sql`SELECT status,payment_status FROM orders WHERE id=\$\{id\} LIMIT 1`/);
+  assert.match(admin, /paymentGuard\[0\]\.payment_status !== 'approved'/);
+  assert.match(admin, /const finalOrderStatus = orderStatusFromShippingEvent\(currentOrder, 'processing'\)/);
+  assert.match(admin, /status=\$\{finalOrderStatus\}/);
   assert.match(admin, /releaseReservedStockIfUnshipped/);
+});
+
+test('notificación de despacho exige que el pago siga aprobado', () => {
+  const admin = read('api/admin.js');
+  const envios = read('api/envios.js');
+  assert.match(admin, /updated\[0\]\?\.payment_status === 'approved'/);
+  assert.match(admin, /order\.payment_status === 'approved'/);
+  assert.match(envios, /orders\[0\]\.payment_status === 'approved'/);
 });
 
 test('sync automático de Enviopack respeta la verdad del pago', () => {
