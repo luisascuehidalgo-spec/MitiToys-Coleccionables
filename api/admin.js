@@ -3,6 +3,7 @@ const { verify } = require('./admin-auth');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStock } = require('../lib/inventory');
 const { expirePreference } = require('../lib/payments');
+const { adminStatusError } = require('../lib/order-state');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
   getShipment, getShipmentTracking, getShipmentLabel
@@ -219,12 +220,8 @@ module.exports = async (req,res)=>{
       const before=await sql`SELECT status,payment_id,payment_status,preference_id FROM orders WHERE id=${id}`;
       if(!before.length) return res.status(404).json({error:'Pedido no encontrado.'});
       const previous=before[0];
-      if(previous.status!==status && status==='refunded' && !['refunded','charged_back'].includes(String(previous.payment_status||''))) {
-        return res.status(409).json({error:'El pedido solo puede marcarse como reembolsado cuando Mercado Pago confirme el reembolso.'});
-      }
-      if(previous.status!==status && status==='cancelled' && previous.payment_id && !['cancelled','rejected'].includes(String(previous.payment_status||''))) {
-        return res.status(409).json({error:'Este pedido ya tiene un pago en Mercado Pago. Cancelalo o reembolsalo primero desde Mercado Pago.'});
-      }
+      const transitionError=adminStatusError({currentStatus:previous.status,targetStatus:status,paymentId:previous.payment_id,paymentStatus:previous.payment_status});
+      if(transitionError) return res.status(409).json({error:transitionError});
       if(previous.status!==status && status==='cancelled' && !previous.payment_id && previous.preference_id) {
         try { await expirePreference(previous.preference_id); }
         catch(error) {
