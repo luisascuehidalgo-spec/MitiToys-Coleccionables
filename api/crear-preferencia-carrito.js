@@ -6,7 +6,7 @@ const {
   normalizeCart,
   cartHash
 } = require('../lib/shipping');
-const { releaseReservedStock } = require('../lib/inventory');
+const { reserveStock, releaseReservedStock } = require('../lib/inventory');
 const { PUBLIC_BASE_URL, preferenceWindow } = require('../lib/payments');
 
 const clean = (value, max = 200) => String(value || '').trim().slice(0, max);
@@ -157,10 +157,9 @@ module.exports = async (req, res) => {
 
     for (const item of items) {
       if (!item.stockManaged) continue;
-      const update = await sql`UPDATE products SET stock_quantity=stock_quantity-${item.qty},updated_at=NOW() WHERE id=${item.id} AND stock_quantity>=${item.qty} RETURNING stock_quantity`;
-      if (!update.length) throw new Error(`Sin stock disponible para ${item.title}.`);
+      const reservation = await reserveStock(sql, { productId: item.id, orderId, quantity: item.qty });
+      if (!reservation.length) throw new Error(`Sin stock disponible para ${item.title}.`);
       reserved.push(item);
-      await sql`INSERT INTO inventory_movements(product_id,order_id,movement_type,quantity,reason) VALUES(${item.id},${orderId},'reserve',${-item.qty},'Reserva automática al iniciar una compra')`;
     }
 
     const preferenceItems = items.map(item => ({

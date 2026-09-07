@@ -21,7 +21,7 @@ test('una cotización solo puede ser reclamada una vez antes de reservar stock',
   const api = read('api/crear-preferencia-carrito.js');
   const claim = "UPDATE shipping_quotes SET used_at=NOW(),order_id=${orderId} WHERE id=${shippingQuoteId} AND used_at IS NULL AND expires_at>NOW() RETURNING id";
   const orderItemInsert = 'INSERT INTO order_items';
-  const stockReserve = 'UPDATE products SET stock_quantity=stock_quantity-${item.qty}';
+  const stockReserve = 'reserveStock(sql, { productId: item.id, orderId, quantity: item.qty })';
 
   const claimIndex = api.indexOf(claim);
   const orderItemIndex = api.indexOf(orderItemInsert);
