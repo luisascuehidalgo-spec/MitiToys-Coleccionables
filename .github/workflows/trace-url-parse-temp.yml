@@ -1,0 +1,32 @@
+name: Trace url.parse dependency usage
+
+on:
+  push:
+    branches:
+      - qa/trace-url-parse-20260907
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install production dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Show installed dependency tree
+        run: npm ls --all || true
+      - name: Locate legacy url.parse calls
+        shell: bash
+        run: |
+          echo '=== literal url.parse( matches ==='
+          grep -RIn --exclude='*.map' --exclude='*.md' --exclude='*.d.ts' 'url\.parse[[:space:]]*(' node_modules || true
+          echo '=== destructured/alias parse imports from node:url or url ==='
+          grep -RIn --exclude='*.map' --exclude='*.md' --exclude='*.d.ts' -E "require\(['\"](node:)?url['\"]\)|from ['\"](node:)?url['\"]" node_modules || true
+          echo '=== package versions ==='
+          node -e "console.log('@neondatabase/serverless', require('@neondatabase/serverless/package.json').version)"
