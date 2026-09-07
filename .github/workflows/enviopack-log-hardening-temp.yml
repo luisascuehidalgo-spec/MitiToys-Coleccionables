@@ -1,0 +1,90 @@
+name: One-time Enviopack Log Hardening
+
+on:
+  push:
+    branches:
+      - qa/enviopack-log-security-20260907
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: qa/enviopack-log-security-20260907
+          fetch-depth: 0
+      - name: Sanitize provider logging
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          replacements = {
+              'lib/shipping.js': [
+                  ("console.error('Enviopack destination validation error:', validationResponse.status, validation);",
+                   "console.error('Enviopack destination validation error:', 'status=' + validationResponse.status);"),
+                  ("console.error('Enviopack quote error:', response.status, data);",
+                   "console.error('Enviopack quote error:', 'status=' + response.status);"),
+              ],
+              'api/envios.js': [
+                  ("console.warn('tracking unavailable:', error.message);",
+                   "console.warn('tracking unavailable:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown'));"),
+                  ("console.error('Enviopack webhook sync:', error);",
+                   "console.error('Enviopack webhook sync failed:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown'));"),
+                  ("console.error('envios error:', error);",
+                   "console.error('envios error:', 'code=' + String(error?.code || 'SHIPPING_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));"),
+              ],
+              'api/admin.js': [
+                  ("console.warn('tracking unavailable:', error.message);",
+                   "console.warn('tracking unavailable:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown'));"),
+                  ("console.error('admin error:', error);",
+                   "console.error('admin error:', 'code=' + String(error?.code || 'ADMIN_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));"),
+              ],
+          }
+
+          changed = []
+          for filename, pairs in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              original = text
+              for old, new in pairs:
+                  if old in text:
+                      text = text.replace(old, new)
+              if text != original:
+                  path.write_text(text)
+                  changed.append(filename)
+
+          if not changed:
+              raise SystemExit('No expected provider log patterns were changed')
+
+          suspicious = []
+          deny = [
+              'process.env', 'access_token', 'secret', 'authorization', 'cookie', 'headers',
+              ', data)', ', validation)', ', error)', 'error.message'
+          ]
+          for filename in ['lib/shipping.js', 'api/envios.js', 'api/admin.js']:
+              for number, line in enumerate(Path(filename).read_text().splitlines(), 1):
+                  if 'console.' not in line:
+                      continue
+                  lowered = line.lower()
+                  if any(token in lowered for token in deny):
+                      suspicious.append(f'{filename}:{number}')
+
+          if suspicious:
+              print('Suspicious provider logging remains at: ' + ', '.join(suspicious))
+              raise SystemExit(1)
+
+          print('Sanitized provider logging in: ' + ', '.join(changed))
+      - name: Commit hardened logging
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/enviopack-log-hardening-temp.yml
+          git add lib/shipping.js api/envios.js api/admin.js
+          git commit -m "Sanitize Enviopack provider logs"
+          git push origin qa/enviopack-log-security-20260907
