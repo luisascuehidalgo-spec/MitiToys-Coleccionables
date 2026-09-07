@@ -19,6 +19,7 @@ test('descuento de stock y movimiento reserve ocurren en una sola sentencia SQL'
     assert.match(text, /INSERT INTO inventory_movements/);
     assert.match(text, /movement_type,quantity,reason/);
     assert.match(text, /FROM updated_product/);
+    assert.doesNotMatch(text, /ON CONFLICT/);
     return [{ product_id: '1705', quantity: -2 }];
   };
 
@@ -42,4 +43,12 @@ test('checkout usa reserveStock y no separa descuento de movimiento de inventari
   assert.match(checkout, /reserveStock/);
   assert.doesNotMatch(checkout, /UPDATE products SET stock_quantity=stock_quantity-\$\{item\.qty\}/);
   assert.doesNotMatch(checkout, /INSERT INTO inventory_movements\(product_id,order_id,movement_type,quantity,reason\) VALUES\(\$\{item\.id\},\$\{orderId\},'reserve'/);
+});
+
+test('la migración impide dos reservas del mismo producto para el mismo pedido', () => {
+  const migration = read('database/migrations/20260907_inventory_reserve_idempotency.sql');
+  assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS inventory_movements_one_reserve_per_order_product/);
+  assert.match(migration, /order_id, product_id, movement_type/);
+  assert.match(migration, /order_id IS NOT NULL/);
+  assert.match(migration, /movement_type = 'reserve'/);
 });
