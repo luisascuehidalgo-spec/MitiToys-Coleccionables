@@ -32,6 +32,11 @@ function logistics(body, fallback = {}, preserveExisting = false) {
   return values;
 }
 
+function validVersion(value) {
+  const version = clean(value, 80);
+  return version && Number.isFinite(Date.parse(version)) ? version : '';
+}
+
 module.exports = async (req, res) => {
   if (!verify(req)) return res.status(401).json({ error: 'No autorizado.' });
   const sql = getDb();
@@ -64,16 +69,28 @@ module.exports = async (req, res) => {
       const title = clean(req.body?.title, 180);
       const description = clean(req.body?.description, 6000);
       const images = parseImages(req.body?.images);
+      const expectedVersion = validVersion(req.body?.updated_at);
       if (!id || !title || !Number.isInteger(stock) || stock < 0 || !Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Datos de producto inválidos.' });
-      const current = await sql`SELECT stock_quantity,images,weight_kg,package_length_cm,package_width_cm,package_height_cm FROM products WHERE id=${id}`;
+      if (!expectedVersion) return res.status(409).json({ error: 'La versión del producto está desactualizada. Actualizá el panel antes de guardar.' });
+      const current = await sql`SELECT stock_quantity,images,weight_kg,package_length_cm,package_width_cm,package_height_cm,updated_at FROM products WHERE id=${id}`;
       if (!current.length) return res.status(404).json({ error: 'Producto no encontrado.' });
       const shipping = logistics(req.body, current[0], true);
       const originalImages = req.body?.original_images ?? current[0].images ?? [];
       const uploaded = await sql`SELECT COUNT(*)::int AS count FROM product_images WHERE product_id=${id}`;
       if (images.length + Number(uploaded[0]?.count || 0) > 8) return res.status(400).json({ error: 'Este producto supera el máximo de 8 fotos.' });
       const delta = stock - Number(current[0].stock_quantity);
-      const rows = await sql`UPDATE products SET title=${title},description=${description},images=${JSON.stringify(images)}::jsonb,stock_quantity=${stock},stock_managed=${managed},active=${active},price=${price},weight_kg=${shipping.weight_kg},package_length_cm=${shipping.package_length_cm},package_width_cm=${shipping.package_width_cm},package_height_cm=${shipping.package_height_cm},updated_at=NOW() WHERE id=${id} AND COALESCE(images,'[]'::jsonb)=${JSON.stringify(originalImages)}::jsonb RETURNING *`;
-      if (!rows.length) return res.status(409).json({ error: 'Las fotos cambiaron desde que abriste el panel. Actualizá antes de guardar para conservarlas.' });
+      const rows = await sql`
+        UPDATE products SET
+          title=${title},description=${description},images=${JSON.stringify(images)}::jsonb,
+          stock_quantity=${stock},stock_managed=${managed},active=${active},price=${price},
+          weight_kg=${shipping.weight_kg},package_length_cm=${shipping.package_length_cm},
+          package_width_cm=${shipping.package_width_cm},package_height_cm=${shipping.package_height_cm},updated_at=NOW()
+        WHERE id=${id}
+          AND date_trunc('milliseconds',updated_at)=date_trunc('milliseconds',${expectedVersion}::timestamptz)
+          AND COALESCE(images,'[]'::jsonb)=${JSON.stringify(originalImages)}::jsonb
+        RETURNING *
+      `;
+      if (!rows.length) return res.status(409).json({ error: 'El producto cambió desde que abriste el panel. Actualizá antes de guardar para no sobrescribir cambios.' });
       if (delta !== 0) await sql`INSERT INTO inventory_movements(product_id,movement_type,quantity,reason) VALUES(${id},'adjustment',${delta},'Ajuste desde panel de administración')`;
       return res.status(200).json({ product: rows[0] });
     }
