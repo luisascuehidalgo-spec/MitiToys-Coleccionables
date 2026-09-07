@@ -24,7 +24,7 @@ async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
   const details = await getShipment(shipmentId);
   let tracking = [];
   if (loadTracking && String(details?.estado || '').toUpperCase() === 'P') {
-    try { tracking = await getShipmentTracking(shipmentId); } catch (error) { console.warn('tracking unavailable:', error.message); }
+    try { tracking = await getShipmentTracking(shipmentId); } catch (error) { console.warn('tracking unavailable:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown')); }
   }
   const trackingNumber = String(details?.tracking_number || details?.numero_tracking || orders[0].tracking_number || '').trim() || null;
   const state = shipmentState(details, tracking);
@@ -74,7 +74,7 @@ module.exports = async (req, res) => {
       const webhookType = String(req.query?.tipo || '');
       const webhookId = String(req.query?.id || '');
       if (webhookId && ['envio-procesado', 'envio-cambio-condicion'].includes(webhookType)) {
-        try { await syncProviderShipment(sql, webhookId, true); } catch (error) { console.error('Enviopack webhook sync:', error); }
+        try { await syncProviderShipment(sql, webhookId, true); } catch (error) { console.error('Enviopack webhook sync failed:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown')); }
         return res.status(200).json({ received: true });
       }
 
@@ -156,7 +156,7 @@ module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json({ delivery_type: deliveryType, province_code: provinceCode, expires_at: expiresAt.toISOString(), options });
   } catch (error) {
-    console.error('envios error:', error);
+    console.error('envios error:', 'code=' + String(error?.code || 'SHIPPING_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));
     const status = error?.code === 'NO_SHIPPING_RATES' ? 404 : error?.code === 'DESTINATION_MISMATCH' ? 400 : error?.code === 'SHIPPING_NOT_CONFIGURED' ? 503 : 502;
     return res.status(status).json({ code: error?.code || 'SHIPPING_ERROR', error: error?.message || 'No se pudo procesar el envío.' });
   }
