@@ -1,0 +1,22 @@
+name: Trace Neon constructor deprecation
+
+on:
+  push:
+    branches:
+      - qa/trace-url-parse-20260907
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Reproduce constructor with fake URL
+        run: node --trace-deprecation -e "const {neon}=require('@neondatabase/serverless'); neon('postgresql://user:pass@example.com/db?sslmode=require'); console.log('neon-constructor-complete')"
