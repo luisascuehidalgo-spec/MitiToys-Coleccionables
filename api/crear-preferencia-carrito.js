@@ -6,23 +6,14 @@ const {
   normalizeCart,
   cartHash
 } = require('../lib/shipping');
+const { releaseReservedStock } = require('../lib/inventory');
+const { PUBLIC_BASE_URL, preferenceWindow } = require('../lib/payments');
 
 const clean = (value, max = 200) => String(value || '').trim().slice(0, max);
 const PRODUCTOS = {
   '3377': { id: '3377', title: 'Figura Luffy Gear 5 – Nika – One Piece – 31 cm', description: 'Figura coleccionable de Monkey D. Luffy Gear 5 / Nika, One Piece. 31 cm aprox., PVC, incluye figura + caja.', price: 150000, picture_url: 'https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/20241123034449_1.jpg' },
   '3375': { id: '3375', title: 'Figura One Piece Kaido Dragón 30 Cm PVC Coleccionable Anime', description: 'Estatua coleccionable de Kaido con dragón azul. 30 cm aprox. de altura, 37 cm aprox. de ancho, PVC.', price: 300000, picture_url: 'https://raw.githubusercontent.com/luisascuehidalgo-spec/COD-3375/main/D_NQ_NP_2X_758000-MLA115602430906_092026-F.webp' }
 };
-
-async function releaseReservedStock(sql, orderId, reserved, reason) {
-  for (const item of reserved) {
-    try {
-      await sql`UPDATE products SET stock_quantity=stock_quantity+${item.qty},updated_at=NOW() WHERE id=${item.id}`;
-      await sql`INSERT INTO inventory_movements(product_id,order_id,movement_type,quantity,reason) VALUES(${item.id},${orderId},'release',${item.qty},${reason})`;
-    } catch (error) {
-      console.error('No se pudo liberar stock:', item.id, error);
-    }
-  }
-}
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
@@ -42,7 +33,7 @@ module.exports = async (req, res) => {
     const email = clean(customer.email, 160).toLowerCase();
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Ingresá un email válido para continuar.' });
 
-    const origin = req.headers.origin || 'https://otaku-collectibles.vercel.app';
+    const origin = PUBLIC_BASE_URL;
     sql = getDb();
     const items = [];
 
@@ -204,7 +195,8 @@ module.exports = async (req, res) => {
         failure: `${origin}/pedido.html?pedido=${encodeURIComponent(orderNumber)}&pago=fallido`
       },
       auto_return: 'approved',
-      statement_descriptor: 'MITITOYS'
+      statement_descriptor: 'MITITOYS',
+      ...preferenceWindow()
     };
 
     const mercadoPagoResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
@@ -229,10 +221,10 @@ module.exports = async (req, res) => {
     `;
     return res.status(200).json({ init_point: mercadoPago.init_point, preference_id: mercadoPago.id, order_number: orderNumber, subtotal, shipping_amount: shippingAmount, total });
   } catch (error) {
-    console.error('crear-preferencia-carrito error:', error);
+    console.error('crear-preferencia-carrito error:', 'code=' + String(error?.code || error?.name || 'CHECKOUT_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));
     if (sql && orderId) {
       try { await sql`UPDATE orders SET status='cancelled',updated_at=NOW() WHERE id=${orderId}`; } catch (_) {}
-      await releaseReservedStock(sql, orderId, reserved, 'Liberación por error al crear el pago');
+      try { await releaseReservedStock(sql, orderId, 'Liberación por error al crear el pago'); } catch (_) {}
       if (shippingQuoteId) {
         try { await sql`UPDATE shipping_quotes SET used_at=NULL,order_id=NULL WHERE id=${shippingQuoteId} AND order_id=${orderId}`; } catch (_) {}
       }
