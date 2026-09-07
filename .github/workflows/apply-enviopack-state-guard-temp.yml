@@ -1,0 +1,65 @@
+name: Apply monotonic Enviopack state guards
+on:
+  push:
+    branches: [fix/enviopack-state-guard-20260907]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/enviopack-state-guard-20260907
+      - name: Patch Enviopack state writes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('api/envios.js')
+          s = p.read_text()
+          anchor = "const { findPaymentsByExternalReference } = require('../lib/payments');\n"
+          if anchor not in s:
+            raise SystemExit('envios import anchor not found')
+          s = s.replace(anchor, anchor + "const { orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');\n", 1)
+          s = s.replace(
+            "SELECT id,tracking_number,status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1",
+            "SELECT id,tracking_number,status,payment_status,shipping_status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1",
+            1
+          )
+          old = """  const state = shipmentState(details, tracking);\n  const labelReady = String(details?.estado || '').toUpperCase() === 'P';\n  await sql`\n    UPDATE orders SET\n      enviopack_state=${String(details?.estado || '') || null},\n      tracking_number=${trackingNumber},\n      shipping_label_ready=${labelReady},\n      shipping_status=${state.shipping},\n      status=${state.order},\n      shipping_last_synced_at=NOW(),\n      shipping_last_error=NULL,\n      updated_at=NOW()\n    WHERE id=${orders[0].id}\n  `;\n  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${orders[0].id},'enviopack.synced',${orders[0].status},${state.order},${JSON.stringify({ shipment_id: String(shipmentId), provider_state: details?.estado || null, tracking_number: trackingNumber, tracking })}::jsonb)`;\n  if (trackingNumber && trackingNumber !== orders[0].tracking_number) await queueAndSendOrderNotification(sql, orders[0].id, 'shipment_created');\n  if (state.order === 'delivered') {\n    await ensureReviewInvites(sql, orders[0].id);\n    await queueAndSendOrderNotification(sql, orders[0].id, 'review_invite');\n  }\n  return { details, tracking, trackingNumber, state, labelReady };"""
+          new = """  const state = shipmentState(details, tracking);\n  const nextOrderStatus = orderStatusFromShipping(orders[0].status, orders[0].payment_status, state.order);\n  const nextShippingStatus = shippingStatusFromProvider(orders[0].shipping_status, state.shipping);\n  const labelReady = String(details?.estado || '').toUpperCase() === 'P';\n  await sql`\n    UPDATE orders SET\n      enviopack_state=${String(details?.estado || '') || null},\n      tracking_number=${trackingNumber},\n      shipping_label_ready=${labelReady},\n      shipping_status=${nextShippingStatus},\n      status=${nextOrderStatus},\n      shipping_last_synced_at=NOW(),\n      shipping_last_error=NULL,\n      updated_at=NOW()\n    WHERE id=${orders[0].id}\n  `;\n  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${orders[0].id},'enviopack.synced',${orders[0].status},${nextOrderStatus},${JSON.stringify({ shipment_id: String(shipmentId), provider_state: details?.estado || null, proposed_order_status: state.order, proposed_shipping_status: state.shipping, applied_shipping_status: nextShippingStatus, tracking_number: trackingNumber, tracking })}::jsonb)`;\n  if (trackingNumber && trackingNumber !== orders[0].tracking_number) await queueAndSendOrderNotification(sql, orders[0].id, 'shipment_created');\n  if (nextOrderStatus === 'delivered') {\n    await ensureReviewInvites(sql, orders[0].id);\n    await queueAndSendOrderNotification(sql, orders[0].id, 'review_invite');\n  }\n  return { details, tracking, trackingNumber, state: { order: nextOrderStatus, shipping: nextShippingStatus }, labelReady };"""
+          if old not in s:
+            raise SystemExit('envios sync block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          p = Path('api/admin.js')
+          s = p.read_text()
+          old_import = "const { adminStatusError } = require('../lib/order-state');\n"
+          new_import = "const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');\n"
+          if old_import not in s:
+            raise SystemExit('admin import anchor not found')
+          s = s.replace(old_import, new_import, 1)
+
+          old_create = """    const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;\n    const labelReady = providerShipmentState.toUpperCase() === 'P';\n    await sql`\n      UPDATE orders SET\n        enviopack_shipment_id=${shipmentId},enviopack_state=${providerShipmentState || null},\n        shipping_destination_type=${order.shipping_destination_type},\n        shipping_street=${order.shipping_street || null},shipping_number=${order.shipping_number || null},\n        shipping_branch_id=${order.shipping_branch_id || null},shipping_branch_name=${order.shipping_branch_name || null},\n        shipping_branch_address=${order.shipping_branch_address || null},\n        tracking_number=${trackingNumber},shipping_label_ready=${labelReady},\n        shipping_generation_status='created',shipping_status='preparing',status='processing',\n        shipping_created_at=NOW(),shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()\n      WHERE id=${id}\n    `;\n    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created','processing',${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;"""
+          new_create = """    const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;\n    const labelReady = providerShipmentState.toUpperCase() === 'P';\n    const nextOrderStatus = orderStatusFromShipping(order.status, order.payment_status, 'processing');\n    const nextShippingStatus = shippingStatusFromProvider(order.shipping_status, 'preparing');\n    await sql`\n      UPDATE orders SET\n        enviopack_shipment_id=${shipmentId},enviopack_state=${providerShipmentState || null},\n        shipping_destination_type=${order.shipping_destination_type},\n        shipping_street=${order.shipping_street || null},shipping_number=${order.shipping_number || null},\n        shipping_branch_id=${order.shipping_branch_id || null},shipping_branch_name=${order.shipping_branch_name || null},\n        shipping_branch_address=${order.shipping_branch_address || null},\n        tracking_number=${trackingNumber},shipping_label_ready=${labelReady},\n        shipping_generation_status='created',shipping_status=${nextShippingStatus},status=${nextOrderStatus},\n        shipping_created_at=NOW(),shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()\n      WHERE id=${id}\n    `;\n    await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.shipment_created',${order.status},${nextOrderStatus},${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, applied_shipping_status: nextShippingStatus, tracking_number: trackingNumber })}::jsonb)`;"""
+          if old_create not in s:
+            raise SystemExit('admin create shipment block not found')
+          s = s.replace(old_create, new_create, 1)
+
+          old_sync = """  const trackingNumber = clean(details?.tracking_number || details?.numero_tracking || order.tracking_number, 120) || null;\n  const state = providerState(details, tracking);\n  const labelReady = String(details?.estado || '').toUpperCase() === 'P';\n  await sql`\n    UPDATE orders SET enviopack_state=${String(details?.estado || '') || null},tracking_number=${trackingNumber},\n      shipping_label_ready=${labelReady},shipping_status=${state.shipping},status=${state.order},\n      shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()\n    WHERE id=${id}\n  `;\n  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${state.order},${JSON.stringify({ tracking_number: trackingNumber, tracking })}::jsonb)`;\n  if (trackingNumber && trackingNumber !== order.tracking_number) await queueAndSendOrderNotification(sql, id, 'shipment_created');\n  if (state.order === 'delivered') {\n    await ensureReviewInvites(sql, id);\n    await queueAndSendOrderNotification(sql, id, 'review_invite');\n  }\n  return { cached: false, tracking_number: trackingNumber, label_ready: labelReady, shipping_status: state.shipping, events: tracking };"""
+          new_sync = """  const trackingNumber = clean(details?.tracking_number || details?.numero_tracking || order.tracking_number, 120) || null;\n  const state = providerState(details, tracking);\n  const nextOrderStatus = orderStatusFromShipping(order.status, order.payment_status, state.order);\n  const nextShippingStatus = shippingStatusFromProvider(order.shipping_status, state.shipping);\n  const labelReady = String(details?.estado || '').toUpperCase() === 'P';\n  await sql`\n    UPDATE orders SET enviopack_state=${String(details?.estado || '') || null},tracking_number=${trackingNumber},\n      shipping_label_ready=${labelReady},shipping_status=${nextShippingStatus},status=${nextOrderStatus},\n      shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()\n    WHERE id=${id}\n  `;\n  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${nextOrderStatus},${JSON.stringify({ proposed_order_status: state.order, proposed_shipping_status: state.shipping, applied_shipping_status: nextShippingStatus, tracking_number: trackingNumber, tracking })}::jsonb)`;\n  if (trackingNumber && trackingNumber !== order.tracking_number) await queueAndSendOrderNotification(sql, id, 'shipment_created');\n  if (nextOrderStatus === 'delivered') {\n    await ensureReviewInvites(sql, id);\n    await queueAndSendOrderNotification(sql, id, 'review_invite');\n  }\n  return { cached: false, tracking_number: trackingNumber, label_ready: labelReady, shipping_status: nextShippingStatus, order_status: nextOrderStatus, events: tracking };"""
+          if old_sync not in s:
+            raise SystemExit('admin sync block not found')
+          s = s.replace(old_sync, new_sync, 1)
+          p.write_text(s)
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/apply-enviopack-state-guard-temp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api/envios.js api/admin.js .github/workflows/apply-enviopack-state-guard-temp.yml
+          git commit -m "Make Enviopack state updates monotonic"
+          git push origin HEAD:fix/enviopack-state-guard-20260907
