@@ -239,7 +239,7 @@ module.exports = async (req,res)=>{
     }
     return res.status(405).json({error:'Método no permitido'});
   }catch(error){
-    console.error('admin error:',error);
+    console.error('admin error:', 'code=' + String(error?.code || 'ADMIN_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));
     const status=error.status||(['INSUFFICIENT_SHIPPING_BALANCE','SHIPPING_DEPOSIT_MISSING','PRODUCT_SHIPPING_DATA_MISSING'].includes(error.code)?409:500);
     return res.status(status).json({code:error.code||'ADMIN_ERROR',error:error.message||'Error interno del panel.'});
   }
