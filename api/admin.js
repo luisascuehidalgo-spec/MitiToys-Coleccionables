@@ -128,7 +128,7 @@ async function syncShipment(sql, id) {
   const details = await getShipment(order.enviopack_shipment_id);
   let tracking = [];
   if (String(details?.estado || '').toUpperCase() === 'P') {
-    try { tracking = await getShipmentTracking(order.enviopack_shipment_id); } catch (error) { console.warn('tracking unavailable:', error.message); }
+    try { tracking = await getShipmentTracking(order.enviopack_shipment_id); } catch (error) { console.warn('tracking unavailable:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown')); }
   }
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking || order.tracking_number, 120) || null;
   const state = providerState(details, tracking);
