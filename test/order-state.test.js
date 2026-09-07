@@ -6,6 +6,7 @@ const {
   orderStatusFromPayment,
   publicOrderStatus,
   orderStatusFromShipping,
+  shippingStatusFromProvider,
   adminStatusError,
   adminStatusOptions
 } = require('../lib/order-state');
@@ -44,14 +45,24 @@ test('estados terminales del proveedor prevalecen sin resucitar un reembolso', (
   assert.equal(orderStatusFromPayment('refunded', 'approved'), 'refunded');
 });
 
-test('Enviopack solo puede avanzar estados con pago aprobado', () => {
+test('Enviopack solo avanza fulfillment con pago aprobado y nunca retrocede', () => {
   assert.equal(orderStatusFromShipping({ status: 'pending', payment_status: 'pending' }, 'processing'), 'pending');
   assert.equal(orderStatusFromShipping({ status: 'approved', payment_status: 'approved' }, 'processing'), 'processing');
   assert.equal(orderStatusFromShipping({ status: 'processing', payment_status: 'approved' }, 'shipped'), 'shipped');
-  assert.equal(orderStatusFromShipping({ status: 'shipped', payment_status: 'approved' }, 'delivered'), 'delivered');
+  assert.equal(orderStatusFromShipping({ status: 'shipped', payment_status: 'approved' }, 'processing'), 'shipped');
+  assert.equal(orderStatusFromShipping({ status: 'delivered', payment_status: 'approved' }, 'shipped'), 'delivered');
+  assert.equal(orderStatusFromShipping({ status: 'shipped', payment_status: 'pending' }, 'processing'), 'shipped');
   assert.equal(orderStatusFromShipping({ status: 'refunded', payment_status: 'refunded' }, 'delivered'), 'refunded');
   assert.equal(orderStatusFromShipping({ status: 'cancelled', payment_status: 'rejected' }, 'shipped'), 'cancelled');
   assert.equal(orderStatusFromShipping({ status: 'refunded', payment_status: 'approved' }, 'processing'), 'refunded');
+});
+
+test('estado logístico de Enviopack no retrocede por respuestas transitorias débiles', () => {
+  assert.equal(shippingStatusFromProvider('delivered', 'preparing'), 'delivered');
+  assert.equal(shippingStatusFromProvider('in_transit', 'preparing'), 'in_transit');
+  assert.equal(shippingStatusFromProvider('exception', 'preparing'), 'exception');
+  assert.equal(shippingStatusFromProvider('preparing', 'in_transit'), 'in_transit');
+  assert.equal(shippingStatusFromProvider('in_transit', 'delivered'), 'delivered');
 });
 
 test('admin no puede avanzar una compra sin pago aprobado', () => {
@@ -164,11 +175,12 @@ test('admin backend y UI comparten reglas respaldadas por Mercado Pago', () => {
 
 test('generación de envío revalida el pago y protege carreras con Enviopack', () => {
   const adminApi = read('api/admin.js');
-  assert.match(adminApi, /payment_status='approved' AND enviopack_shipment_id IS NULL/);
+  assert.match(adminApi, /payment_status='approved' AND status NOT IN \('cancelled','refunded'\) AND enviopack_shipment_id IS NULL/);
   assert.match(adminApi, /firstPaymentGuard/);
   assert.match(adminApi, /secondPaymentGuard/);
   assert.match(adminApi, /PAYMENT_CHANGED_DURING_SHIPMENT/);
   assert.match(adminApi, /orderStatusFromShipping\(currentOrder, 'processing'\)/);
+  assert.match(adminApi, /shippingStatusFromProvider\(currentOrder\.shipping_status, 'preparing'\)/);
   assert.match(adminApi, /enviopack\.generation_aborted/);
   assert.match(adminApi, /releaseReservedStockIfUnshipped/);
 });
@@ -182,13 +194,15 @@ test('envío ya creado nunca queda marcado como reintentable por una falla poste
   assert.match(adminApi, /No vuelvas a generarlo/);
 });
 
-test('sync de Enviopack no pisa estados financieros ni envía avisos con pago no aprobado', () => {
+test('sync de Enviopack no pisa estados financieros, logísticos ni envía avisos con pago no aprobado', () => {
   const adminApi = read('api/admin.js');
   const envios = read('api/envios.js');
   assert.match(adminApi, /orderStatusFromShipping\(order, state\.order\)/);
+  assert.match(adminApi, /shippingStatusFromProvider\(order\.shipping_status, state\.shipping\)/);
   assert.match(adminApi, /order\.payment_status === 'approved'/);
-  assert.match(envios, /SELECT id,tracking_number,status,payment_status FROM orders/);
+  assert.match(envios, /SELECT id,tracking_number,status,payment_status,shipping_status FROM orders/);
   assert.match(envios, /orderStatusFromShipping\(orders\[0\], state\.order\)/);
+  assert.match(envios, /shippingStatusFromProvider\(orders\[0\]\.shipping_status, state\.shipping\)/);
   assert.match(envios, /orders\[0\]\.payment_status === 'approved'/);
 });
 
