@@ -1,9 +1,9 @@
 const { getDb } = require('../lib/db');
 const { verify } = require('./admin-auth');
 const { searchParams } = require('../lib/request-url');
-const { releaseReservedStock } = require('../lib/inventory');
+const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { expirePreference } = require('../lib/payments');
-const { adminStatusError } = require('../lib/order-state');
+const { adminStatusError, orderStatusFromShipping } = require('../lib/order-state');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
   getShipment, getShipmentTracking, getShipmentLabel
@@ -55,6 +55,7 @@ async function packagesForOrder(sql, order) {
 }
 
 async function createShipment(sql, id) {
+  let providerShipmentCreated = false;
   let order = await loadFulfillmentOrder(sql, id);
   if (!order) throw Object.assign(new Error('Pedido no encontrado.'), { status: 404 });
   if (order.enviopack_shipment_id) return { reused: true, order };
@@ -63,10 +64,10 @@ async function createShipment(sql, id) {
 
   const claim = await sql`
     UPDATE orders SET shipping_generation_status='processing',shipping_last_error=NULL,updated_at=NOW()
-    WHERE id=${id} AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')
+    WHERE id=${id} AND payment_status='approved' AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')
     RETURNING id
   `;
-  if (!claim.length) throw Object.assign(new Error('El envío ya se está generando. Actualizá el panel en unos segundos.'), { status: 409 });
+  if (!claim.length) throw Object.assign(new Error('El envío ya se está generando o el pago dejó de estar aprobado. Actualizá el panel antes de reintentar.'), { status: 409 });
 
   try {
     const address = parseAddress(order);
@@ -86,12 +87,20 @@ async function createShipment(sql, id) {
 
     const items = await sql`SELECT product_id,product_title,quantity FROM order_items WHERE order_id=${id} ORDER BY id`;
     const packages = await packagesForOrder(sql, order);
+    const firstPaymentGuard = await sql`SELECT payment_status FROM orders WHERE id=${id} LIMIT 1`;
+    if (!firstPaymentGuard.length || firstPaymentGuard[0].payment_status !== 'approved') {
+      throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de iniciar el despacho.'), { status: 409, code: 'PAYMENT_CHANGED_DURING_SHIPMENT' });
+    }
     const providerOrderId = order.enviopack_order_id || await getOrCreateEnviopackOrder({
       order,
       customer: { name: order.customer_name, email: order.customer_email, phone: order.customer_phone },
       items
     });
     await sql`UPDATE orders SET enviopack_order_id=${providerOrderId},updated_at=NOW() WHERE id=${id}`;
+    const secondPaymentGuard = await sql`SELECT payment_status FROM orders WHERE id=${id} LIMIT 1`;
+    if (!secondPaymentGuard.length || secondPaymentGuard[0].payment_status !== 'approved') {
+      throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de confirmar el despacho.'), { status: 409, code: 'PAYMENT_CHANGED_DURING_SHIPMENT' });
+    }
 
     const shipment = await createConfirmedShipment({
       providerOrderId,
@@ -99,11 +108,15 @@ async function createShipment(sql, id) {
       packages,
       quote: { service_code: order.service_code, carrier_id: order.shipping_carrier_id, dispatch_mode: order.dispatch_mode }
     });
+    providerShipmentCreated = true;
     const shipmentId = String(shipment.id);
     const providerShipmentState = String(shipment.estado || '');
     const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;
     const labelReady = providerShipmentState.toUpperCase() === 'P';
-    await sql`
+    const currentRows = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
+    const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
+    const finalOrderStatus = orderStatusFromShipping(currentOrder, 'processing');
+    const updated = await sql`
       UPDATE orders SET
         enviopack_shipment_id=${shipmentId},enviopack_state=${providerShipmentState || null},
         shipping_destination_type=${order.shipping_destination_type},
@@ -111,15 +124,28 @@ async function createShipment(sql, id) {
         shipping_branch_id=${order.shipping_branch_id || null},shipping_branch_name=${order.shipping_branch_name || null},
         shipping_branch_address=${order.shipping_branch_address || null},
         tracking_number=${trackingNumber},shipping_label_ready=${labelReady},
-        shipping_generation_status='created',shipping_status='preparing',status='processing',
+        shipping_generation_status='created',shipping_status='preparing',status=${finalOrderStatus},
         shipping_created_at=NOW(),shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
       WHERE id=${id}
+      RETURNING status,payment_status
     `;
-    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created','processing',${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;
-    if (trackingNumber) await queueAndSendOrderNotification(sql, id, 'shipment_created');
-    return { reused: false, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady };
+    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created',${finalOrderStatus},${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;
+    if (trackingNumber && updated[0]?.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
+    return { reused: false, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady, order_status: finalOrderStatus };
   } catch (error) {
     await sql`UPDATE orders SET shipping_generation_status='failed',shipping_last_error=${clean(error.message, 1000)},updated_at=NOW() WHERE id=${id}`;
+    if (!providerShipmentCreated && error?.code === 'PAYMENT_CHANGED_DURING_SHIPMENT') {
+      try {
+        const paymentRows = await sql`SELECT payment_status FROM orders WHERE id=${id} LIMIT 1`;
+        const paymentStatus = String(paymentRows[0]?.payment_status || '');
+        if (['cancelled','rejected','refunded','charged_back'].includes(paymentStatus)) {
+          const stockRelease = await releaseReservedStockIfUnshipped(sql, id, 'Liberación tras abortar generación de envío por cambio de pago');
+          await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.generation_aborted',${orderStatusFromShipping({status:order.status,payment_status:paymentStatus},order.status)},${JSON.stringify({ reason: 'payment_changed', stock_release: stockRelease })}::jsonb)`;
+        }
+      } catch (releaseError) {
+        console.warn('shipment abort stock release failed:', 'code=' + String(releaseError?.code || releaseError?.name || 'RELEASE_ERROR'));
+      }
+    }
     throw error;
   }
 }
@@ -136,6 +162,7 @@ async function syncShipment(sql, id) {
   }
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking || order.tracking_number, 120) || null;
   const state = providerState(details, tracking);
+  state.order = orderStatusFromShipping(order, state.order);
   const labelReady = String(details?.estado || '').toUpperCase() === 'P';
   await sql`
     UPDATE orders SET enviopack_state=${String(details?.estado || '') || null},tracking_number=${trackingNumber},
@@ -144,7 +171,7 @@ async function syncShipment(sql, id) {
     WHERE id=${id}
   `;
   await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${state.order},${JSON.stringify({ tracking_number: trackingNumber, tracking })}::jsonb)`;
-  if (trackingNumber && trackingNumber !== order.tracking_number) await queueAndSendOrderNotification(sql, id, 'shipment_created');
+  if (trackingNumber && trackingNumber !== order.tracking_number && order.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
   if (state.order === 'delivered') {
     await ensureReviewInvites(sql, id);
     await queueAndSendOrderNotification(sql, id, 'review_invite');
@@ -231,11 +258,12 @@ module.exports = async (req,res)=>{
       }
       const shippingStatus=status==='shipped'?'in_transit':status==='delivered'?'delivered':status==='processing'?'preparing':'not_shipped';
       const rows=await sql`UPDATE orders SET status=${status},shipping_status=${shippingStatus},shipping_recipient=${recipient},shipping_address=${address||null},shipping_street=${street},shipping_number=${number},shipping_floor=${floor},shipping_unit=${unit},shipping_city=${city},shipping_postal_code=${postal},shipping_phone=${phone},shipping_notes=${notes},shipping_carrier=${carrier},tracking_number=${tracking},updated_at=NOW() WHERE id=${id} RETURNING *`;
+      let stockRelease=null;
       if(previous.status!==status && (status==='cancelled'||status==='refunded')) {
-        await releaseReservedStock(sql,id,status==='refunded'?'Liberación por reembolso confirmado':'Liberación por cancelación confirmada');
+        stockRelease=await releaseReservedStockIfUnshipped(sql,id,status==='refunded'?'Liberación por reembolso confirmado':'Liberación por cancelación confirmada');
       }
       if(previous.status!==status){
-        await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'admin.status_changed',${previous.status},${status},${JSON.stringify({tracking_number:tracking,shipping_carrier:carrier})}::jsonb)`;
+        await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'admin.status_changed',${previous.status},${status},${JSON.stringify({tracking_number:tracking,shipping_carrier:carrier,stock_release:stockRelease})}::jsonb)`;
         const notificationType={approved:'payment_approved',processing:'order_processing',shipped:'shipment_created',cancelled:'order_cancelled',refunded:'order_refunded'}[status];
         if(notificationType) await queueAndSendOrderNotification(sql,id,notificationType);
         if(status==='delivered'){await ensureReviewInvites(sql,id);await queueAndSendOrderNotification(sql,id,'review_invite');}
