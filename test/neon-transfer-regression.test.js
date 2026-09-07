@@ -16,6 +16,17 @@ test('catálogo público no fuerza cache miss ni referencia imágenes binarias d
   assert.match(catalog, /mititoys_catalog_cache_v4/);
 });
 
+test('ficha, carrito y checkout usan el catálogo estable y no imágenes binarias', () => {
+  for (const file of ['producto.html', 'carrito.html', 'checkout.html']) {
+    const source = read(file);
+    assert.doesNotMatch(source, /\/api\/productos\?cb=/, `${file} volvió a forzar cache-busting del catálogo`);
+    assert.doesNotMatch(source, /\/api\/product-image/, `${file} volvió a depender de imágenes binarias de Neon`);
+  }
+  assert.match(read('producto.html'), /fetch\('\/api\/productos'/);
+  assert.match(read('carrito.html'), /fetch\('\/api\/productos'\)/);
+  assert.match(read('checkout.html'), /fetch\('\/api\/productos'\)/);
+});
+
 test('API pública de productos no consulta product_images y usa caché CDN corta', () => {
   const products = read('api/productos.js');
   assert.doesNotMatch(products, /FROM product_images|JOIN product_images/);
