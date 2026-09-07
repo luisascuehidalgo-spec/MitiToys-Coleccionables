@@ -1,6 +1,8 @@
 const { getDb } = require('../lib/db');
 const { verify } = require('./admin-auth');
 const { searchParams } = require('../lib/request-url');
+const { releaseReservedStock } = require('../lib/inventory');
+const { expirePreference } = require('../lib/payments');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
   getShipment, getShipmentTracking, getShipmentLabel
@@ -214,12 +216,29 @@ module.exports = async (req,res)=>{
       const phone=req.body?.shipping_phone==null?null:clean(req.body.shipping_phone,50);
       const notes=req.body?.shipping_notes==null?null:clean(req.body.shipping_notes,1000);
       if(!Number.isInteger(id)||id<1||!VALID.has(status)) return res.status(400).json({error:'Datos de pedido inválidos.'});
-      const before=await sql`SELECT status FROM orders WHERE id=${id}`;
+      const before=await sql`SELECT status,payment_id,payment_status,preference_id FROM orders WHERE id=${id}`;
       if(!before.length) return res.status(404).json({error:'Pedido no encontrado.'});
+      const previous=before[0];
+      if(previous.status!==status && status==='refunded' && !['refunded','charged_back'].includes(String(previous.payment_status||''))) {
+        return res.status(409).json({error:'El pedido solo puede marcarse como reembolsado cuando Mercado Pago confirme el reembolso.'});
+      }
+      if(previous.status!==status && status==='cancelled' && previous.payment_id && !['cancelled','rejected'].includes(String(previous.payment_status||''))) {
+        return res.status(409).json({error:'Este pedido ya tiene un pago en Mercado Pago. Cancelalo o reembolsalo primero desde Mercado Pago.'});
+      }
+      if(previous.status!==status && status==='cancelled' && !previous.payment_id && previous.preference_id) {
+        try { await expirePreference(previous.preference_id); }
+        catch(error) {
+          console.warn('Mercado Pago preference expiration failed:', 'code=' + String(error?.code || 'MP_PREFERENCE_EXPIRE_FAILED'), 'status=' + String(error?.providerStatus || 'unknown'));
+          return res.status(502).json({error:'No se pudo cancelar de forma segura el enlace de pago. No se modificó el pedido.'});
+        }
+      }
       const shippingStatus=status==='shipped'?'in_transit':status==='delivered'?'delivered':status==='processing'?'preparing':'not_shipped';
       const rows=await sql`UPDATE orders SET status=${status},shipping_status=${shippingStatus},shipping_recipient=${recipient},shipping_address=${address||null},shipping_street=${street},shipping_number=${number},shipping_floor=${floor},shipping_unit=${unit},shipping_city=${city},shipping_postal_code=${postal},shipping_phone=${phone},shipping_notes=${notes},shipping_carrier=${carrier},tracking_number=${tracking},updated_at=NOW() WHERE id=${id} RETURNING *`;
-      if(before[0].status!==status){
-        await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'admin.status_changed',${before[0].status},${status},${JSON.stringify({tracking_number:tracking,shipping_carrier:carrier})}::jsonb)`;
+      if(previous.status!==status && (status==='cancelled'||status==='refunded')) {
+        await releaseReservedStock(sql,id,status==='refunded'?'Liberación por reembolso confirmado':'Liberación por cancelación confirmada');
+      }
+      if(previous.status!==status){
+        await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'admin.status_changed',${previous.status},${status},${JSON.stringify({tracking_number:tracking,shipping_carrier:carrier})}::jsonb)`;
         const notificationType={approved:'payment_approved',processing:'order_processing',shipped:'shipment_created',cancelled:'order_cancelled',refunded:'order_refunded'}[status];
         if(notificationType) await queueAndSendOrderNotification(sql,id,notificationType);
         if(status==='delivered'){await ensureReviewInvites(sql,id);await queueAndSendOrderNotification(sql,id,'review_invite');}

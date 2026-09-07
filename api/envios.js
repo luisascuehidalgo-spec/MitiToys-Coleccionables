@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
+const { releaseReservedStock } = require('../lib/inventory');
+const { findPaymentsByExternalReference } = require('../lib/payments');
 const {
   shippingEnabled, normalizePostalCode, normalizeProvinceCode, normalizeCart, cartHash,
   buildPackages, quoteEnviopack, listLocalities, quoteEnviopackBranch,
@@ -54,18 +56,67 @@ async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
 async function runAutomation(sql) {
   const abandoned = await sql`
     SELECT id FROM orders
-    WHERE status='pending' AND payment_status='pending' AND payment_url IS NOT NULL
-      AND created_at < NOW()-INTERVAL '2 hours' AND created_at > NOW()-INTERVAL '48 hours'
+    WHERE status='pending' AND COALESCE(payment_status,'pending')='pending' AND payment_url IS NOT NULL
+      AND created_at < NOW()-INTERVAL '2 hours' AND created_at > NOW()-INTERVAL '24 hours'
     ORDER BY created_at LIMIT 25
   `;
   for (const order of abandoned) await queueOrderNotification(sql, order.id, 'abandoned_checkout');
+
+  const expired = await sql`
+    SELECT id,external_reference FROM orders
+    WHERE status='pending' AND COALESCE(payment_status,'pending')='pending'
+      AND payment_id IS NULL AND payment_url IS NOT NULL
+      AND created_at < NOW()-INTERVAL '26 hours'
+    ORDER BY created_at LIMIT 25
+  `;
+  let expiredCancelled = 0;
+  let providerPaymentsFound = 0;
+  let providerChecksFailed = 0;
+  let stockUnitsReleased = 0;
+
+  for (const order of expired) {
+    let payments;
+    try {
+      payments = await findPaymentsByExternalReference(order.external_reference);
+    } catch (error) {
+      providerChecksFailed += 1;
+      console.warn('Mercado Pago cleanup check failed:', 'code=' + String(error?.code || 'MP_PAYMENT_SEARCH_FAILED'), 'status=' + String(error?.providerStatus || 'unknown'));
+      continue;
+    }
+    if (payments.length) {
+      providerPaymentsFound += 1;
+      continue;
+    }
+
+    const claimed = await sql`
+      UPDATE orders SET status='cancelled',payment_status='expired',updated_at=NOW()
+      WHERE id=${order.id} AND status='pending' AND payment_id IS NULL
+        AND COALESCE(payment_status,'pending')='pending'
+      RETURNING id
+    `;
+    if (!claimed.length) continue;
+
+    const released = await releaseReservedStock(sql, order.id, 'Liberación por checkout vencido');
+    stockUnitsReleased += released.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${order.id},'checkout.expired','pending','cancelled',${JSON.stringify({ stock_released: released })}::jsonb)`;
+    expiredCancelled += 1;
+  }
+
   const delivered = await sql`SELECT id FROM orders WHERE status='delivered' ORDER BY updated_at DESC LIMIT 25`;
   for (const order of delivered) {
     await ensureReviewInvites(sql, order.id);
     await queueOrderNotification(sql, order.id, 'review_invite');
   }
   const deliveredNotifications = await deliverPendingNotifications(sql, 20);
-  return { abandoned_queued: abandoned.length, delivered_review_checked: delivered.length, notifications_processed: deliveredNotifications.length };
+  return {
+    abandoned_queued: abandoned.length,
+    expired_cancelled: expiredCancelled,
+    provider_payments_found: providerPaymentsFound,
+    provider_checks_failed: providerChecksFailed,
+    stock_units_released: stockUnitsReleased,
+    delivered_review_checked: delivered.length,
+    notifications_processed: deliveredNotifications.length
+  };
 }
 
 module.exports = async (req, res) => {

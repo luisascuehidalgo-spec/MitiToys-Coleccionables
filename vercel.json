@@ -12,7 +12,7 @@
   "crons": [
     {
       "path": "/api/envios?action=automation",
-      "schedule": "0 14 * * *"
+      "schedule": "0 * * * *"
     }
   ]
 }
