@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+// Regression guard: provider logs must remain metadata-only.
 const PROVIDER_FILES = ['lib/shipping.js', 'api/envios.js', 'api/admin.js'];
 
 function source(file) {
