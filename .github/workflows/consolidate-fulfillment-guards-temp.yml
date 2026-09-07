@@ -1,0 +1,81 @@
+name: Consolidate fulfillment guards
+on:
+  push:
+    branches:
+      - fix/fulfillment-race-integrity-20260907
+    paths:
+      - .github/workflows/consolidate-fulfillment-guards-temp.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/fulfillment-race-integrity-20260907
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply consolidated admin and Enviopack guards
+        shell: python
+        run: |
+          from pathlib import Path
+
+          admin_path = Path('api/admin.js')
+          admin = admin_path.read_text()
+          replacements = [
+            ("const { adminStatusError, orderStatusFromShipping } = require('../lib/order-state');",
+             "const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');"),
+            ("WHERE id=${id} AND payment_status='approved' AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')",
+             "WHERE id=${id} AND payment_status='approved' AND status NOT IN ('cancelled','refunded') AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')"),
+            ("const firstPaymentGuard = await sql`SELECT payment_status FROM orders WHERE id=${id} LIMIT 1`;\n    if (!firstPaymentGuard.length || firstPaymentGuard[0].payment_status !== 'approved') {",
+             "const firstPaymentGuard = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;\n    if (!firstPaymentGuard.length || firstPaymentGuard[0].payment_status !== 'approved' || ['cancelled','refunded'].includes(String(firstPaymentGuard[0].status || ''))) {"),
+            ("const secondPaymentGuard = await sql`SELECT payment_status FROM orders WHERE id=${id} LIMIT 1`;\n    if (!secondPaymentGuard.length || secondPaymentGuard[0].payment_status !== 'approved') {",
+             "const secondPaymentGuard = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;\n    if (!secondPaymentGuard.length || secondPaymentGuard[0].payment_status !== 'approved' || ['cancelled','refunded'].includes(String(secondPaymentGuard[0].status || ''))) {"),
+            ("const currentRows = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;",
+             "const currentRows = await sql`SELECT status,payment_status,shipping_status FROM orders WHERE id=${id} LIMIT 1`;"),
+            ("const finalOrderStatus = orderStatusFromShipping(currentOrder, 'processing');\n    const updated = await sql`",
+             "const finalOrderStatus = orderStatusFromShipping(currentOrder, 'processing');\n    const finalShippingStatus = shippingStatusFromProvider(currentOrder.shipping_status, 'preparing');\n    const updated = await sql`"),
+            ("shipping_generation_status='created',shipping_status='preparing',status=${finalOrderStatus},",
+             "shipping_generation_status='created',shipping_status=${finalShippingStatus},status=${finalOrderStatus},"),
+            ("const recoveredOrderStatus = orderStatusFromShipping(currentOrder, 'processing');\n        await sql`",
+             "const recoveredOrderStatus = orderStatusFromShipping(currentOrder, 'processing');\n        const recoveredShippingStatus = shippingStatusFromProvider(currentOrder.shipping_status, 'preparing');\n        await sql`"),
+            ("shipping_generation_status='created',status=${recoveredOrderStatus},",
+             "shipping_generation_status='created',shipping_status=${recoveredShippingStatus},status=${recoveredOrderStatus},"),
+            ("state.order = orderStatusFromShipping(order, state.order);\n  const labelReady",
+             "state.order = orderStatusFromShipping(order, state.order);\n  state.shipping = shippingStatusFromProvider(order.shipping_status, state.shipping);\n  const labelReady"),
+          ]
+          for old, new in replacements:
+            if old not in admin:
+              raise SystemExit(f'admin replacement target missing: {old[:90]}')
+            admin = admin.replace(old, new)
+          admin_path.write_text(admin)
+
+          envios_path = Path('api/envios.js')
+          envios = envios_path.read_text()
+          replacements = [
+            ("const { orderStatusFromShipping } = require('../lib/order-state');",
+             "const { orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');"),
+            ("SELECT id,tracking_number,status,payment_status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1",
+             "SELECT id,tracking_number,status,payment_status,shipping_status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1"),
+            ("state.order = orderStatusFromShipping(orders[0], state.order);\n  const labelReady",
+             "state.order = orderStatusFromShipping(orders[0], state.order);\n  state.shipping = shippingStatusFromProvider(orders[0].shipping_status, state.shipping);\n  const labelReady"),
+          ]
+          for old, new in replacements:
+            if old not in envios:
+              raise SystemExit(f'envios replacement target missing: {old[:90]}')
+            envios = envios.replace(old, new)
+          envios_path.write_text(envios)
+      - name: Run full regression suite
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/consolidate-fulfillment-guards-temp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api/admin.js api/envios.js .github/workflows/consolidate-fulfillment-guards-temp.yml
+          git commit -m "Consolidate monotonic Enviopack fulfillment guards"
+          git push origin HEAD:fix/fulfillment-race-integrity-20260907
