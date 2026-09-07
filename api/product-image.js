@@ -1,8 +1,9 @@
 const { getDb } = require('../lib/db');
+const { searchParams } = require('../lib/request-url');
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).end();
-  const id = Number(req.query?.id);
+  const id = Number(searchParams(req).get('id'));
   if (!Number.isInteger(id) || id < 1) return res.status(400).end();
   try {
     const sql = getDb();

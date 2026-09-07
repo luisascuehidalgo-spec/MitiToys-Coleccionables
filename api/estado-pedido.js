@@ -1,11 +1,13 @@
 const { getDb } = require('../lib/db');
 const { ensureReviewInvites } = require('../lib/notifications');
+const { searchParams } = require('../lib/request-url');
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
   try {
-    const number = String(req.query?.pedido || '').trim().slice(0, 80);
-    const email = String(req.query?.email || '').trim().toLowerCase().slice(0, 160);
+    const query = searchParams(req);
+    const number = String(query.get('pedido') || '').trim().slice(0, 80);
+    const email = String(query.get('email') || '').trim().toLowerCase().slice(0, 160);
     if (!number) return res.status(400).json({ error: 'Falta el número de pedido.' });
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Ingresá el email utilizado en la compra.' });
 

@@ -1,5 +1,6 @@
 const { getDb } = require('../lib/db');
 const { verify } = require('./admin-auth');
+const { searchParams } = require('../lib/request-url');
 const { configuration, uploadImage } = require('../lib/cloudinary');
 
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -27,6 +28,7 @@ function readBody(req) {
 }
 
 module.exports = async (req, res) => {
+  const query = searchParams(req);
   if (!verify(req)) return res.status(401).json({ error: 'No autorizado.' });
   try {
     if (req.method === 'GET') {
@@ -36,7 +38,7 @@ module.exports = async (req, res) => {
     }
     const sql = getDb();
     if (req.method === 'POST') {
-      const productId = clean(req.query?.productId, 50);
+      const productId = clean(query.get('productId'), 50);
       const mime = clean(req.headers['content-type'], 100).split(';')[0].toLowerCase();
       const filename = clean(req.headers['x-filename'], 180) || 'imagen';
       if (!productId) return res.status(400).json({ error: 'Falta el producto.' });
@@ -68,7 +70,7 @@ module.exports = async (req, res) => {
       return res.status(201).json({ image: { url, filename, mime_type: mime } });
     }
     if (req.method === 'DELETE') {
-      const id = Number(req.query?.id);
+      const id = Number(query.get('id'));
       if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Imagen inválida.' });
       await sql`DELETE FROM product_images WHERE id=${id}`;
       return res.status(200).json({ ok: true });

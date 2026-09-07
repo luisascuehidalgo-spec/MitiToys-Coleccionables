@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getDb } = require('../lib/db');
+const { searchParams } = require('../lib/request-url');
 const {
   shippingEnabled, normalizePostalCode, normalizeProvinceCode, normalizeCart, cartHash,
   buildPackages, quoteEnviopack, listLocalities, quoteEnviopackBranch,
@@ -68,25 +69,26 @@ async function runAutomation(sql) {
 }
 
 module.exports = async (req, res) => {
+  const query = searchParams(req);
   const sql = getDb();
   try {
     if (req.method === 'GET') {
-      const webhookType = String(req.query?.tipo || '');
-      const webhookId = String(req.query?.id || '');
+      const webhookType = String(query.get('tipo') || '');
+      const webhookId = String(query.get('id') || '');
       if (webhookId && ['envio-procesado', 'envio-cambio-condicion'].includes(webhookType)) {
         try { await syncProviderShipment(sql, webhookId, true); } catch (error) { console.error('Enviopack webhook sync failed:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown')); }
         return res.status(200).json({ received: true });
       }
 
-      if (req.query?.action === 'localities') {
-        const provinceCode = normalizeProvinceCode(req.query?.province);
+      if (query.get('action') === 'localities') {
+        const provinceCode = normalizeProvinceCode(query.get('province'));
         if (!provinceCode) return res.status(400).json({ error: 'Provincia inválida.' });
         const localities = await listLocalities(provinceCode);
         res.setHeader('Cache-Control', 'private, max-age=1800');
         return res.status(200).json({ localities });
       }
 
-      if (req.query?.action === 'automation') {
+      if (query.get('action') === 'automation') {
         if (!process.env.CRON_SECRET || req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).json({ error: 'No autorizado.' });
         return res.status(200).json({ ok: true, ...(await runAutomation(sql)) });
       }
