@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   orderStatusFromPayment,
+  orderStatusFromShipping,
+  shippingStatusFromProvider,
   adminStatusError,
   adminStatusOptions
 } = require('../lib/order-state');
@@ -29,6 +31,29 @@ test('estados terminales del proveedor prevalecen sin resucitar un reembolso', (
   assert.equal(orderStatusFromPayment('shipped', 'refunded'), 'refunded');
   assert.equal(orderStatusFromPayment('refunded', 'rejected'), 'refunded');
   assert.equal(orderStatusFromPayment('refunded', 'approved'), 'refunded');
+});
+
+test('Enviopack solo avanza fulfillment y nunca lo retrocede', () => {
+  assert.equal(orderStatusFromShipping('approved', 'approved', 'processing'), 'processing');
+  assert.equal(orderStatusFromShipping('processing', 'approved', 'shipped'), 'shipped');
+  assert.equal(orderStatusFromShipping('shipped', 'approved', 'delivered'), 'delivered');
+  assert.equal(orderStatusFromShipping('shipped', 'approved', 'processing'), 'shipped');
+  assert.equal(orderStatusFromShipping('delivered', 'approved', 'processing'), 'delivered');
+});
+
+test('Enviopack no avanza pedidos sin pago aprobado ni revive terminales', () => {
+  assert.equal(orderStatusFromShipping('pending', 'pending', 'shipped'), 'pending');
+  assert.equal(orderStatusFromShipping('pending', 'validation_failed', 'delivered'), 'pending');
+  assert.equal(orderStatusFromShipping('cancelled', 'approved', 'delivered'), 'cancelled');
+  assert.equal(orderStatusFromShipping('refunded', 'approved', 'delivered'), 'refunded');
+});
+
+test('estado de transporte conserva hitos fuertes ante respuestas transitorias', () => {
+  assert.equal(shippingStatusFromProvider('delivered', 'preparing'), 'delivered');
+  assert.equal(shippingStatusFromProvider('in_transit', 'preparing'), 'in_transit');
+  assert.equal(shippingStatusFromProvider('exception', 'preparing'), 'exception');
+  assert.equal(shippingStatusFromProvider('exception', 'in_transit'), 'in_transit');
+  assert.equal(shippingStatusFromProvider('preparing', 'delivered'), 'delivered');
 });
 
 test('admin no puede avanzar una compra sin pago aprobado', () => {
@@ -72,6 +97,10 @@ test('opciones del admin dependen del estado real del pago', () => {
     adminStatusOptions({ status: 'approved', payment_status: 'approved', payment_id: 'p1' }).sort(),
     ['approved', 'delivered', 'processing', 'shipped']
   );
+  assert.deepEqual(
+    adminStatusOptions({ status: 'pending', payment_status: 'validation_failed', payment_id: 'p2' }).sort(),
+    ['pending']
+  );
 });
 
 test('webhook usa máquina de estados y valida importe/moneda antes de aprobar', () => {
@@ -80,6 +109,18 @@ test('webhook usa máquina de estados y valida importe/moneda antes de aprobar',
   assert.match(webhook, /paymentMatchesOrder\(payment, order\)/);
   assert.match(webhook, /payment\.validation_failed/);
   assert.match(webhook, /total_amount,currency/);
+  assert.match(webhook, /payment_status='validation_failed'/);
+  assert.match(webhook, /payment_status_detail='amount_or_currency_mismatch'/);
+});
+
+test('Enviopack aplica guard monotónico en webhook, sync manual y creación', () => {
+  const envios = read('api/envios.js');
+  const admin = read('api/admin.js');
+  assert.match(envios, /orderStatusFromShipping\(orders\[0\]\.status, orders\[0\]\.payment_status, state\.order\)/);
+  assert.match(envios, /shippingStatusFromProvider\(orders\[0\]\.shipping_status, state\.shipping\)/);
+  assert.match(admin, /orderStatusFromShipping\(order\.status, order\.payment_status, 'processing'\)/);
+  assert.match(admin, /orderStatusFromShipping\(order\.status, order\.payment_status, state\.order\)/);
+  assert.match(admin, /shippingStatusFromProvider\(order\.shipping_status, state\.shipping\)/);
 });
 
 test('checkout legado está cerrado y la home nunca lo invoca', () => {
