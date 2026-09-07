@@ -1,5 +1,6 @@
 const { getDb } = require('../lib/db');
 const { verify } = require('./admin-auth');
+const { searchParams } = require('../lib/request-url');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
   getShipment, getShipmentTracking, getShipmentLabel
@@ -149,11 +150,12 @@ async function syncShipment(sql, id) {
 }
 
 module.exports = async (req,res)=>{
+  const query=searchParams(req);
   if(!verify(req)) return res.status(401).json({error:'No autorizado.'});
   const sql=getDb();
   try{
-    if(req.method==='GET' && req.query?.action==='label'){
-      const id=Number(req.query?.id);
+    if(req.method==='GET' && query.get('action')==='label'){
+      const id=Number(query.get('id'));
       if(!Number.isInteger(id)||id<1) return res.status(400).json({error:'Pedido inválido.'});
       const rows=await sql`SELECT order_number,enviopack_shipment_id,shipping_label_ready FROM orders WHERE id=${id} LIMIT 1`;
       if(!rows.length||!rows[0].enviopack_shipment_id) return res.status(404).json({error:'El pedido no tiene un envío generado.'});

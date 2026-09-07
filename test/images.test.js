@@ -26,7 +26,8 @@ async function call(handler,method,{body,bytes=png,authorized=true,query:params=
   const value='admin:'+Date.now();
   const signature=createHmac('sha256',process.env.ADMIN_SESSION_SECRET||'').update(value).digest('hex');
   const req=Readable.from([bytes]);
-  Object.assign(req,{method,body,query:params,headers:{'content-type':mime,cookie:authorized?'mititoys_admin='+Buffer.from(value+'.'+signature).toString('base64url'):''}});
+  const search=new URLSearchParams(params||{}).toString();
+  Object.assign(req,{method,body,url:'/api/admin-image'+(search?'?'+search:''),headers:{'content-type':mime,cookie:authorized?'mititoys_admin='+Buffer.from(value+'.'+signature).toString('base64url'):''}});
   const res={code:200,headers:{},status(code){this.code=code;return this},json(value){this.body=value;return this},setHeader(k,v){this.headers[k]=v}};
   await handler(req,res);return res;
 }

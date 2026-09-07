@@ -1,11 +1,13 @@
 const { getDb } = require('../lib/db');
+const { searchParams } = require('../lib/request-url');
 const clean = (value, max = 500) => String(value || '').trim().slice(0, max);
 const escapeXml = value => String(value ?? '').replace(/[<>&'\"]/g, char => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[char]));
 
 module.exports = async (req, res) => {
+  const query = searchParams(req);
   const sql = getDb();
   try {
-    if (req.method === 'GET' && req.query?.sitemap) {
+    if (req.method === 'GET' && query.get('sitemap')) {
       const products = await sql`SELECT id,updated_at FROM products WHERE active=true ORDER BY updated_at DESC`;
       const staticUrls = [
         ['https://mititoys.com/', '1.0'],
@@ -24,8 +26,8 @@ module.exports = async (req, res) => {
       return res.status(200).send(xml);
     }
 
-    if (req.method === 'GET' && req.query?.review_token) {
-      const token = clean(req.query.review_token, 80);
+    if (req.method === 'GET' && query.get('review_token')) {
+      const token = clean(query.get('review_token'), 80);
       const rows = await sql`
         SELECT r.product_id,r.status,r.rating,r.title,r.body,p.title AS product_title,
           COALESCE((SELECT url FROM jsonb_array_elements_text(p.images) url LIMIT 1),'') AS legacy_image,
@@ -57,7 +59,7 @@ module.exports = async (req, res) => {
     }
 
     if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido.' });
-    const productId = clean(req.query?.id, 50);
+    const productId = clean(query.get('id'), 50);
     const products = productId
       ? await sql`
           SELECT p.id,p.title,p.description,p.images,p.price,p.stock_quantity,p.stock_managed,p.active,p.created_at,p.updated_at,
