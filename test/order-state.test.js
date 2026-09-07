@@ -54,6 +54,7 @@ test('Enviopack solo avanza fulfillment con pago aprobado y nunca retrocede', ()
   assert.equal(orderStatusFromShipping({ status: 'shipped', payment_status: 'pending' }, 'processing'), 'shipped');
   assert.equal(orderStatusFromShipping({ status: 'refunded', payment_status: 'refunded' }, 'delivered'), 'refunded');
   assert.equal(orderStatusFromShipping({ status: 'cancelled', payment_status: 'rejected' }, 'shipped'), 'cancelled');
+  assert.equal(orderStatusFromShipping({ status: 'cancelled', payment_status: 'approved' }, 'delivered'), 'cancelled');
   assert.equal(orderStatusFromShipping({ status: 'refunded', payment_status: 'approved' }, 'processing'), 'refunded');
 });
 
