@@ -28,39 +28,21 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           checkout = Path('api/crear-preferencia-carrito.js')
           source = checkout.read_text()
-          old = """      let pictureUrl = PRODUCTOS[requested.id]?.picture_url || '';
-      const legacyImages = Array.isArray(product.images) ? product.images : [];
-      if (legacyImages[0]) pictureUrl = String(legacyImages[0]);
-      const uploaded = await sql`SELECT id FROM product_images WHERE product_id=${requested.id} ORDER BY sort_order,id LIMIT 1`;
-      if (uploaded.length) pictureUrl = `${origin}/api/product-image?id=${uploaded[0].id}`;
-"""
-          new = """      let pictureUrl = PRODUCTOS[requested.id]?.picture_url || '';
-      const productImages = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
-      if (productImages[0]) pictureUrl = String(productImages[0]);
-"""
-          if old not in source:
-              raise SystemExit('checkout legacy image block not found')
-          checkout.write_text(source.replace(old, new))
-
+          source = source.replace('      const legacyImages = Array.isArray(product.images) ? product.images : [];\n', '      const productImages = Array.isArray(product.images) ? product.images.filter(Boolean) : [];\n')
+          source = source.replace('      if (legacyImages[0]) pictureUrl = String(legacyImages[0]);\n', '      if (productImages[0]) pictureUrl = String(productImages[0]);\n')
+          source = source.replace('      const uploaded = await sql`SELECT id FROM product_images WHERE product_id=${requested.id} ORDER BY sort_order,id LIMIT 1`;\n', '')
+          source = source.replace('      if (uploaded.length) pictureUrl = `${origin}/api/product-image?id=${uploaded[0].id}`;\n', '')
+          checkout.write_text(source)
           test_file = Path('test/neon-transfer-regression.test.js')
           tests = test_file.read_text()
           marker = "test('API pública de productos no consulta product_images y usa caché CDN corta', () => {"
-          addition = """test('checkout server no consulta ni publica imágenes binarias de Neon', () => {
-  const checkout = read('api/crear-preferencia-carrito.js');
-  assert.doesNotMatch(checkout, /product_images/);
-  assert.doesNotMatch(checkout, /\\/api\\/product-image/);
-});
-
-"""
+          addition = "test('checkout server no consulta ni publica imágenes binarias de Neon', () => {\n  const checkout = read('api/crear-preferencia-carrito.js');\n  assert.doesNotMatch(checkout, /product_images/);\n  assert.doesNotMatch(checkout, /\\/api\\/product-image/);\n});\n\n"
           if addition not in tests:
               if marker not in tests:
                   raise SystemExit('regression insertion marker not found')
-              tests = tests.replace(marker, addition + marker)
-              test_file.write_text(tests)
-
+              test_file.write_text(tests.replace(marker, addition + marker))
           final_source = checkout.read_text()
           if 'product_images' in final_source or '/api/product-image' in final_source:
               raise SystemExit('checkout still contains legacy binary image dependency')
