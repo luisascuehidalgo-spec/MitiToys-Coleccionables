@@ -1,0 +1,38 @@
+name: One-time Admin Log Hardening
+
+on:
+  push:
+    branches:
+      - qa/enviopack-log-security-20260907
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: qa/enviopack-log-security-20260907
+      - name: Sanitize residual admin error log
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('api/admin.js')
+          text = path.read_text()
+          old = "console.error('admin error:',error);"
+          new = "console.error('admin error:', 'code=' + String(error?.code || 'ADMIN_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));"
+          if old not in text:
+              raise SystemExit('Expected residual admin log not found')
+          path.write_text(text.replace(old, new))
+      - name: Commit fix and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/admin-log-hardening-temp.yml
+          git add api/admin.js
+          git commit -m "Sanitize residual admin provider error log"
+          git push origin qa/enviopack-log-security-20260907
