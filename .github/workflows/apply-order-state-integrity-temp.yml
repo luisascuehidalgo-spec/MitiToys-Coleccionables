@@ -1,0 +1,61 @@
+name: Apply order state integrity hardening
+on:
+  push:
+    branches: [fix/order-state-integrity-20260907]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/order-state-integrity-20260907
+      - name: Patch admin, notifications and static fallback checkout
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # Admin: all operational states must agree with Mercado Pago truth.
+          p = Path('api/admin.js')
+          s = p.read_text()
+          anchor = "const { expirePreference } = require('../lib/payments');\n"
+          if anchor not in s:
+            raise SystemExit('admin payments import not found')
+          s = s.replace(anchor, anchor + "const { validateAdminStatusTransition } = require('../lib/order-state');\n", 1)
+          old = """      const previous=before[0];\n      if(previous.status!==status && status==='refunded' && !['refunded','charged_back'].includes(String(previous.payment_status||''))) {\n        return res.status(409).json({error:'El pedido solo puede marcarse como reembolsado cuando Mercado Pago confirme el reembolso.'});\n      }\n      if(previous.status!==status && status==='cancelled' && previous.payment_id && !['cancelled','rejected'].includes(String(previous.payment_status||''))) {\n        return res.status(409).json({error:'Este pedido ya tiene un pago en Mercado Pago. Cancelalo o reembolsalo primero desde Mercado Pago.'});\n      }\n"""
+          new = """      const previous=before[0];\n      const transitionError=validateAdminStatusTransition(previous,status);\n      if(previous.status!==status && transitionError) return res.status(409).json({error:transitionError});\n"""
+          if old not in s:
+            raise SystemExit('admin legacy transition checks not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # Email links must always use the official branded domain.
+          p = Path('lib/notifications.js')
+          s = p.read_text()
+          old = "const SITE_URL = String(process.env.PUBLIC_SITE_URL || 'https://otaku-collectibles.vercel.app').replace(/\\/$/, '');"
+          if old not in s:
+            raise SystemExit('notification site URL fallback not found')
+          s = s.replace(old, "const SITE_URL = 'https://mititoys.com';", 1)
+          p.write_text(s)
+
+          # Static home fallback must never call the retired direct-payment API.
+          p = Path('index.html')
+          s = p.read_text()
+          start = s.find("async function pagar(productId,button){")
+          end = s.find("(function(){const params=new URLSearchParams", start)
+          if start < 0 or end < 0:
+            raise SystemExit('legacy pagar function not found')
+          safe = """function pagar(productId,button){\n  try{\n    const key='mititoys_cart';\n    const cart=JSON.parse(localStorage.getItem(key)||'[]');\n    const list=Array.isArray(cart)?cart:[];\n    const id=String(productId);\n    const found=list.find(item=>String(item.id)===id);\n    if(found)found.qty=Math.max(1,Math.floor(Number(found.qty)||1))+1;\n    else list.push({id,qty:1});\n    localStorage.setItem(key,JSON.stringify(list));\n  }catch(_){}\n  if(button){button.disabled=true;button.textContent='⏳ ABRIENDO CHECKOUT...';}\n  window.location.href='/checkout.html?cart=1';\n}\n"""
+          s = s[:start] + safe + s[end:]
+          s = s.replace('💳 PAGAR CON MERCADO PAGO', '🛒 COMPRAR / CALCULAR ENVÍO')
+          p.write_text(s)
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/apply-order-state-integrity-temp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api/admin.js lib/notifications.js index.html .github/workflows/apply-order-state-integrity-temp.yml
+          git commit -m "Enforce payment-backed order states and safe fallback checkout"
+          git push origin HEAD:fix/order-state-integrity-20260907
