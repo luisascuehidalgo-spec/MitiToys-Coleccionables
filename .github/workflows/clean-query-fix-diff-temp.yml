@@ -1,0 +1,53 @@
+name: Clean query parsing diff
+
+on:
+  push:
+    branches:
+      - fix/whatwg-query-parsing-20260907
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/whatwg-query-parsing-20260907
+          fetch-depth: 0
+      - name: Restore admin-image bytes and apply minimal replacements
+        shell: python
+        run: |
+          import subprocess
+          from pathlib import Path
+
+          data = subprocess.check_output(['git', 'show', '71307ac84e4f6ff273d75efecc6fe969b28d51aa:api/admin-image.js'])
+
+          def once(old, new):
+            global data
+            count = data.count(old)
+            if count != 1:
+              raise SystemExit(f'expected one {old!r}, found {count}')
+            data = data.replace(old, new, 1)
+
+          once(
+            b"const { verify } = require('./admin-auth');",
+            b"const { verify } = require('./admin-auth');\nconst { searchParams } = require('../lib/request-url');"
+          )
+          once(
+            b"module.exports = async (req, res) => {",
+            b"module.exports = async (req, res) => {\r\n  const query = searchParams(req);"
+          )
+          once(b"req.query?.productId", b"query.get('productId')")
+          once(b"req.query?.id", b"query.get('id')")
+          Path('api/admin-image.js').write_bytes(data)
+      - name: Commit minimal diff and remove this workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/clean-query-fix-diff-temp.yml
+          git add api/admin-image.js
+          git commit -m "Minimize admin image query parsing diff"
+          git push origin fix/whatwg-query-parsing-20260907
