@@ -68,6 +68,7 @@ async function createShipment(sql, id) {
   `;
   if (!claim.length) throw Object.assign(new Error('El envío ya se está generando o el pago dejó de estar aprobado. Actualizá el panel antes de reintentar.'), { status: 409 });
 
+  let createdShipment = null;
   try {
     const address = parseAddress(order);
     order = {
@@ -103,7 +104,6 @@ async function createShipment(sql, id) {
       throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de confirmar el envío. No se generó el despacho.'), { status: 409 });
     }
 
-    let createdShipment = null;
     const shipment = await createConfirmedShipment({
       providerOrderId,
       order,
@@ -174,7 +174,7 @@ async function syncShipment(sql, id) {
     WHERE id=${id}
   `;
   await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${nextOrderStatus},${JSON.stringify({ proposed_order_status: state.order, proposed_shipping_status: state.shipping, applied_shipping_status: nextShippingStatus, tracking_number: trackingNumber, tracking })}::jsonb)`;
-  if (trackingNumber && trackingNumber !== order.tracking_number) await queueAndSendOrderNotification(sql, id, 'shipment_created');
+  if (trackingNumber && trackingNumber !== order.tracking_number && order.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
   if (nextOrderStatus === 'delivered') {
     await ensureReviewInvites(sql, id);
     await queueAndSendOrderNotification(sql, id, 'review_invite');
