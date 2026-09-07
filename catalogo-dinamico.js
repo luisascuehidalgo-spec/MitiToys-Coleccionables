@@ -1,17 +1,6 @@
 (() => {
-  const CACHE_KEY = 'mititoys_catalog_cache_v3';
+  const CACHE_KEY = 'mititoys_catalog_cache_v4';
   const CACHE_TTL = 15 * 60 * 1000;
-  const FALLBACK_3431 = {
-    id: '3431',
-    title: 'Figura Luffy Gear 5 – Nika – One Piece – 23 cm',
-    description: 'Figura coleccionable de Luffy Gear 5 / Nika de One Piece, 23 cm. Ideal para colección y exhibición.',
-    price: 120000,
-    stock_quantity: 5,
-    stock_managed: true,
-    active: true,
-    created_at: '2026-09-03T11:31:51.645Z',
-    images: ['/api/product-image?id=4', '/api/product-image?id=5']
-  };
 
   const money = value => new Intl.NumberFormat('es-AR', {
     style: 'currency',
@@ -235,8 +224,7 @@
     if (cachedProducts.length && renderProducts(grid, cachedProducts)) refresh();
 
     try {
-      const response = await fetch(`/api/productos?cb=${Date.now()}`, {
-        cache: 'no-store',
+      const response = await fetch('/api/productos', {
         headers: { Accept: 'application/json' }
       });
       if (!response.ok) throw new Error(`Catálogo ${response.status}`);
@@ -249,9 +237,12 @@
       window.MitiToysAnalytics?.track('catalog_view', { products: products.length });
     } catch (error) {
       console.error('catalogo-dinamico api:', error);
-      if (!grid.querySelector('.catalog-card')) grid.innerHTML = '';
-      if (!grid.querySelector('[data-product-id="3431"]')) renderProduct(grid, FALLBACK_3431, grid.children.length);
-      refresh();
+      if (!grid.querySelector('.catalog-card')) {
+        grid.innerHTML = '<p class="muted" style="padding:20px">No pudimos cargar el catálogo en este momento. Intentá nuevamente en unos minutos.</p>';
+        if (count) count.textContent = 'Catálogo temporalmente no disponible';
+      } else {
+        refresh();
+      }
     } finally {
       grid.classList.remove('catalog-loading');
       grid.removeAttribute('aria-busy');
