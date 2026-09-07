@@ -105,7 +105,7 @@ test('create and edit preserve supplied URLs; stale edits are rejected',async t=
     const sql=s.join('?');calls.push({sql,v});
     if(sql.includes('SELECT stock_quantity'))return [{stock_quantity:0,images:[url],updated_at:body.updated_at}];
     if(sql.includes('COUNT(*)'))return [{count:1}];
-    if(sql.startsWith('UPDATE'))return conflict?[]:[body];
+    if(sql.includes('UPDATE products SET'))return conflict?[]:[body];
     throw Error(sql);
   };
   assert.equal((await call(productHandler,'PUT',{body})).code,200);
