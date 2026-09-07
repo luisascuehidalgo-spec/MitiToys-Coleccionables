@@ -55,7 +55,7 @@ async function packagesForOrder(sql, order) {
 }
 
 async function createShipment(sql, id) {
-  let providerShipmentCreated = false;
+  let providerShipment = null;
   let order = await loadFulfillmentOrder(sql, id);
   if (!order) throw Object.assign(new Error('Pedido no encontrado.'), { status: 404 });
   if (order.enviopack_shipment_id) return { reused: true, order };
@@ -108,7 +108,8 @@ async function createShipment(sql, id) {
       packages,
       quote: { service_code: order.service_code, carrier_id: order.shipping_carrier_id, dispatch_mode: order.dispatch_mode }
     });
-    providerShipmentCreated = true;
+    providerShipment = shipment;
+    if (!shipment?.id) throw Object.assign(new Error('Envíopack devolvió una respuesta de envío inválida.'), { status: 502, code: 'INVALID_SHIPMENT_RESPONSE' });
     const shipmentId = String(shipment.id);
     const providerShipmentState = String(shipment.estado || '');
     const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;
@@ -133,8 +134,30 @@ async function createShipment(sql, id) {
     if (trackingNumber && updated[0]?.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
     return { reused: false, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady, order_status: finalOrderStatus };
   } catch (error) {
+    if (providerShipment?.id) {
+      const recoveredShipmentId = String(providerShipment.id);
+      const recoveredProviderState = String(providerShipment.estado || '');
+      try {
+        const currentRows = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
+        const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
+        const recoveredOrderStatus = orderStatusFromShipping(currentOrder, 'processing');
+        await sql`
+          UPDATE orders SET
+            enviopack_shipment_id=COALESCE(enviopack_shipment_id,${recoveredShipmentId}),
+            enviopack_state=COALESCE(enviopack_state,${recoveredProviderState || null}),
+            shipping_generation_status='created',status=${recoveredOrderStatus},
+            shipping_last_error=${clean('El envío fue creado en Envíopack, pero una etapa posterior no se completó. Sincronizá el tracking antes de realizar otra acción.', 1000)},
+            updated_at=NOW()
+          WHERE id=${id}
+        `;
+      } catch (persistError) {
+        console.error('shipment created but local recovery failed:', 'code=' + String(persistError?.code || persistError?.name || 'PERSIST_ERROR'));
+      }
+      throw Object.assign(new Error('El envío ya fue creado en Envíopack, pero no se pudo completar una etapa local. No vuelvas a generarlo; actualizá el tracking o verificá Envíopack.'), { status: 502, code: 'SHIPMENT_CREATED_SYNC_FAILED' });
+    }
+
     await sql`UPDATE orders SET shipping_generation_status='failed',shipping_last_error=${clean(error.message, 1000)},updated_at=NOW() WHERE id=${id}`;
-    if (!providerShipmentCreated && error?.code === 'PAYMENT_CHANGED_DURING_SHIPMENT') {
+    if (error?.code === 'PAYMENT_CHANGED_DURING_SHIPMENT') {
       try {
         const paymentRows = await sql`SELECT payment_status FROM orders WHERE id=${id} LIMIT 1`;
         const paymentStatus = String(paymentRows[0]?.payment_status || '');
