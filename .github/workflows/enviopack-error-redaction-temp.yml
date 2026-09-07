@@ -1,0 +1,55 @@
+name: One-time Enviopack Error Redaction
+
+on:
+  push:
+    branches:
+      - qa/enviopack-error-redaction-20260907
+
+permissions:
+  contents: write
+
+jobs:
+  redact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: qa/enviopack-error-redaction-20260907
+      - name: Replace provider message propagation
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('lib/shipping.js')
+          text = path.read_text()
+          old = """  if (!response.ok) {
+    const providerMessage = String(data?.mensaje || data?.message || data?.error || '').slice(0, 350);
+    throw Object.assign(new Error(providerMessage || 'Envíopack no pudo procesar la solicitud.'), {
+      code: response.status === 402 || /saldo|fondos|balance/i.test(providerMessage) ? 'INSUFFICIENT_SHIPPING_BALANCE' : 'SHIPPING_PROVIDER_ERROR',
+      providerStatus: response.status
+    });
+  }
+"""
+          new = """  if (!response.ok) {
+    const providerMessage = String(data?.mensaje || data?.message || data?.error || '').slice(0, 350);
+    const code = response.status === 402 || /saldo|fondos|balance/i.test(providerMessage)
+      ? 'INSUFFICIENT_SHIPPING_BALANCE'
+      : 'SHIPPING_PROVIDER_ERROR';
+    const safeMessage = code === 'INSUFFICIENT_SHIPPING_BALANCE'
+      ? 'Envíopack informó saldo insuficiente para completar la operación.'
+      : 'Envíopack no pudo procesar la solicitud.';
+    throw Object.assign(new Error(safeMessage), { code, providerStatus: response.status });
+  }
+"""
+          if old not in text:
+              raise SystemExit('Expected Enviopack error block not found')
+          path.write_text(text.replace(old, new))
+      - name: Commit fix and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/enviopack-error-redaction-temp.yml
+          git add lib/shipping.js
+          git commit -m "Redact Enviopack provider error messages"
+          git push origin qa/enviopack-error-redaction-20260907
