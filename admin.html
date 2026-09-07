@@ -57,6 +57,7 @@ async function saveProduct(id){
   try{
     const body={id,title:val('title-'+id),description:val('desc-'+id),price:Number(val('price-'+id)),stock_quantity:Number(val('stock-'+id)),stock_managed:document.getElementById('managed-'+id).checked,active:document.getElementById('active-'+id).checked,images:urls(val('legacy-'+id))};
     const existing=data.products.find(p=>String(p.id)===String(id));
+    body.updated_at=existing?.updated_at||null;
     body.original_images=existing?.images||[];
     const files=validateFiles(document.getElementById('files-'+id).files,body.images.length+(existing?.uploaded_images||[]).length);
     await checkImageService(files);

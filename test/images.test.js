@@ -95,7 +95,7 @@ test('upload signs credentials server-side and refuses unexpected delivery URLs'
   await assert.rejects(uploadImage(png,'image/png'),e=>e.status===502);
 });
 test('create and edit preserve supplied URLs; stale edits are rejected',async t=>{
-  setup(t);const body={id:'test',title:'Test',price:100,stock_quantity:0,images:[url],original_images:[url]};
+  setup(t);const body={id:'test',title:'Test',price:100,stock_quantity:0,images:[url],original_images:[url],updated_at:'2026-09-07T18:00:00.123Z'};
   const calls=[];
   query=async(s,...v)=>{const sql=s.join('?');calls.push({sql,v});return sql.startsWith('SELECT')?[]:[{...body}]};
   assert.equal((await call(productHandler,'POST',{body})).code,201);
@@ -103,9 +103,9 @@ test('create and edit preserve supplied URLs; stale edits are rejected',async t=
   let conflict=false;
   query=async(s,...v)=>{
     const sql=s.join('?');calls.push({sql,v});
-    if(sql.includes('SELECT stock_quantity'))return [{stock_quantity:0,images:[url]}];
+    if(sql.includes('SELECT stock_quantity'))return [{stock_quantity:0,images:[url],updated_at:body.updated_at}];
     if(sql.includes('COUNT(*)'))return [{count:1}];
-    if(sql.startsWith('UPDATE'))return conflict?[]:[body];
+    if(sql.includes('UPDATE products SET'))return conflict?[]:[body];
     throw Error(sql);
   };
   assert.equal((await call(productHandler,'PUT',{body})).code,200);
@@ -138,12 +138,13 @@ test('admin create uploads eight files and reports partial failure with recovery
 });
 test('admin edit sends old URL snapshot and uploads selected image',async()=>{
   let edited=false,uploaded=false;
+  const version='2026-09-07T18:00:00.123Z';
   const {context,get}=adminContext(async(path,options)=>{
-    if(options?.method==='PUT'){edited=true;assert.deepEqual(JSON.parse(options.body).original_images,[url])}
+    if(options?.method==='PUT'){edited=true;const payload=JSON.parse(options.body);assert.deepEqual(payload.original_images,[url]);assert.equal(payload.updated_at,version)}
     if(path.includes('productId'))uploaded=true;
     return {ok:true,json:async()=>({image:{url}})};
   });
-  vm.runInContext('data.products='+JSON.stringify([{id:'test',images:[url],uploaded_images:[{id:1}]}]),context);
+  vm.runInContext('data.products='+JSON.stringify([{id:'test',images:[url],uploaded_images:[{id:1}],updated_at:version}]),context);
   for(const [id,value]of Object.entries({'title-test':'Test','price-test':'100','stock-test':'0','legacy-test':url}))get(id).value=value;
   get('files-test').files=[{size:100,type:'image/png',name:'test.png'}];
   await vm.runInContext("saveProduct('test')",context);

@@ -30,7 +30,8 @@ function baseProduct() {
     weight_kg: 1.25,
     package_length_cm: 30,
     package_width_cm: 25,
-    package_height_cm: 35
+    package_height_cm: 35,
+    updated_at: '2026-09-07T18:00:00.123Z'
   };
 }
 
@@ -45,6 +46,7 @@ function adminBody(product, overrides = {}) {
     active: product.active,
     images: clone(product.images),
     original_images: clone(product.images),
+    updated_at: product.updated_at,
     ...overrides
   };
 }
@@ -76,6 +78,10 @@ async function call(handler, method, body) {
   return res;
 }
 
+function sameMillisecond(a, b) {
+  return Date.parse(a) === Date.parse(b);
+}
+
 function productDb(initial) {
   let state = clone(initial);
   const calls = [];
@@ -90,14 +96,17 @@ function productDb(initial) {
         weight_kg: state.weight_kg,
         package_length_cm: state.package_length_cm,
         package_width_cm: state.package_width_cm,
-        package_height_cm: state.package_height_cm
+        package_height_cm: state.package_height_cm,
+        updated_at: state.updated_at
       }];
     }
 
     if (sql.includes('COUNT(*)::int AS count FROM product_images')) return [{ count: 0 }];
 
     if (sql.startsWith('UPDATE products SET title=')) {
-      const expectedImages = JSON.parse(values[12]);
+      const expectedVersion = values[12];
+      const expectedImages = JSON.parse(values[13]);
+      if (!sameMillisecond(state.updated_at, expectedVersion)) return [];
       if (JSON.stringify(state.images || []) !== JSON.stringify(expectedImages)) return [];
       state = {
         ...state,
@@ -111,7 +120,8 @@ function productDb(initial) {
         weight_kg: values[7],
         package_length_cm: values[8],
         package_width_cm: values[9],
-        package_height_cm: values[10]
+        package_height_cm: values[10],
+        updated_at: '2026-09-07T18:01:00.456Z'
       };
       return [clone(state)];
     }
@@ -235,6 +245,37 @@ test('G: null explícito en logística del PUT general se interpreta como conser
   }));
   assert.equal(res.code, 200);
   assertShippingUnchanged(db.getState(), initial);
+});
+
+test('I: una pestaña vieja no puede sobrescribir cambios de otra pestaña', async t => {
+  setupAuth(t);
+  const initial = baseProduct();
+  const db = productDb(initial);
+  const newer = {
+    ...initial,
+    description: 'CAMBIO DESDE OTRA PESTAÑA',
+    updated_at: '2026-09-07T18:05:00.999Z'
+  };
+  db.setState(newer);
+
+  const res = await call(productHandler, 'PUT', adminBody(initial, { price: 110000 }));
+  assert.equal(res.code, 409);
+  assert.match(res.body.error, /cambió desde que abriste el panel/i);
+  assert.deepEqual(db.getState(), newer);
+  assert.ok(!db.calls.some(call => call.sql.startsWith('INSERT INTO inventory_movements')));
+});
+
+test('I2: PUT general rechaza clientes sin token de versión', async t => {
+  setupAuth(t);
+  const initial = baseProduct();
+  const db = productDb(initial);
+  const body = adminBody(initial, { price: 110000 });
+  delete body.updated_at;
+  const res = await call(productHandler, 'PUT', body);
+  assert.equal(res.code, 409);
+  assert.match(res.body.error, /versión/i);
+  assert.equal(db.calls.length, 0);
+  assert.deepEqual(db.getState(), initial);
 });
 
 test('E: endpoint de logística actualiza solo las cuatro columnas logísticas', async t => {
@@ -380,4 +421,63 @@ test('admin-envios envía exclusivamente id + logística al endpoint aislado', a
   assert.equal(patchPayload.package_length_cm, 31);
   assert.equal(patchPayload.package_width_cm, 26);
   assert.equal(patchPayload.package_height_cm, 36);
+});
+
+function adminContext(fetchImpl) {
+  const nodes = new Map();
+  const get = id => {
+    if (!nodes.has(id)) nodes.set(id, {
+      value: '', files: [], checked: false, disabled: false,
+      textContent: '', className: '', innerHTML: '',
+      classList: { add() {}, remove() {} }, addEventListener() {}
+    });
+    return nodes.get(id);
+  };
+  const context = vm.createContext({
+    document: { getElementById: get },
+    fetch: fetchImpl,
+    URL,
+    Intl,
+    console,
+    location: { reload() {} },
+    alert() {},
+    confirm() { return true; }
+  });
+  const html = fs.readFileSync(require.resolve('../admin.html'), 'utf8');
+  const script = html.match(/<script>([\s\S]*)<\/script>/)[1];
+  vm.runInContext(script, context);
+  return { context, get };
+}
+
+test('admin general envía updated_at de la versión cargada', async () => {
+  const initial = baseProduct();
+  let putPayload;
+  const { context, get } = adminContext(async (path, options = {}) => {
+    if (path === '/api/admin-product' && options.method === 'PUT') {
+      putPayload = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => ({ product: { ...initial, ...putPayload, updated_at: '2026-09-07T18:01:00.456Z' } }) };
+    }
+    if (String(path).startsWith('/api/admin?')) {
+      return { ok: true, status: 200, json: async () => ({ orders: [], customers: [], products: [initial] }) };
+    }
+    throw new Error('Unexpected fetch: ' + path);
+  });
+
+  vm.runInContext('data.products=' + JSON.stringify([initial]), context);
+  for (const [id, value] of Object.entries({
+    ['title-' + initial.id]: initial.title,
+    ['price-' + initial.id]: String(initial.price),
+    ['desc-' + initial.id]: initial.description,
+    ['stock-' + initial.id]: String(initial.stock_quantity),
+    ['legacy-' + initial.id]: initial.images.join('\n')
+  })) get(id).value = value;
+  get('managed-' + initial.id).checked = initial.stock_managed;
+  get('active-' + initial.id).checked = initial.active;
+  get('files-' + initial.id).files = [];
+  get('ps-' + initial.id).textContent = '';
+
+  await vm.runInContext(`saveProduct('${initial.id}')`, context);
+  assert.ok(putPayload);
+  assert.equal(putPayload.updated_at, initial.updated_at);
+  assert.deepEqual(putPayload.original_images, initial.images);
 });
