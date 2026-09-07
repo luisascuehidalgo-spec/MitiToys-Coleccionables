@@ -1,9 +1,9 @@
 const { getDb } = require('../lib/db');
 const { verify } = require('./admin-auth');
 const { searchParams } = require('../lib/request-url');
-const { releaseReservedStock } = require('../lib/inventory');
+const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { expirePreference } = require('../lib/payments');
-const { validateAdminStatusTransition } = require('../lib/order-state');
+const { validateAdminStatusTransition, orderStatusFromShippingEvent } = require('../lib/order-state');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
   getShipment, getShipmentTracking, getShipmentLabel
@@ -63,10 +63,10 @@ async function createShipment(sql, id) {
 
   const claim = await sql`
     UPDATE orders SET shipping_generation_status='processing',shipping_last_error=NULL,updated_at=NOW()
-    WHERE id=${id} AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')
+    WHERE id=${id} AND payment_status='approved' AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')
     RETURNING id
   `;
-  if (!claim.length) throw Object.assign(new Error('El envío ya se está generando. Actualizá el panel en unos segundos.'), { status: 409 });
+  if (!claim.length) throw Object.assign(new Error('El envío ya se está generando o el pago dejó de estar aprobado. Actualizá el panel antes de reintentar.'), { status: 409 });
 
   try {
     const address = parseAddress(order);
@@ -136,6 +136,7 @@ async function syncShipment(sql, id) {
   }
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking || order.tracking_number, 120) || null;
   const state = providerState(details, tracking);
+  state.order = orderStatusFromShippingEvent(order, state.order);
   const labelReady = String(details?.estado || '').toUpperCase() === 'P';
   await sql`
     UPDATE orders SET enviopack_state=${String(details?.estado || '') || null},tracking_number=${trackingNumber},
@@ -231,11 +232,12 @@ module.exports = async (req,res)=>{
       }
       const shippingStatus=status==='shipped'?'in_transit':status==='delivered'?'delivered':status==='processing'?'preparing':'not_shipped';
       const rows=await sql`UPDATE orders SET status=${status},shipping_status=${shippingStatus},shipping_recipient=${recipient},shipping_address=${address||null},shipping_street=${street},shipping_number=${number},shipping_floor=${floor},shipping_unit=${unit},shipping_city=${city},shipping_postal_code=${postal},shipping_phone=${phone},shipping_notes=${notes},shipping_carrier=${carrier},tracking_number=${tracking},updated_at=NOW() WHERE id=${id} RETURNING *`;
+      let stockRelease=null;
       if(previous.status!==status && (status==='cancelled'||status==='refunded')) {
-        await releaseReservedStock(sql,id,status==='refunded'?'Liberación por reembolso confirmado':'Liberación por cancelación confirmada');
+        stockRelease=await releaseReservedStockIfUnshipped(sql,id,status==='refunded'?'Liberación por reembolso confirmado':'Liberación por cancelación confirmada');
       }
       if(previous.status!==status){
-        await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'admin.status_changed',${previous.status},${status},${JSON.stringify({tracking_number:tracking,shipping_carrier:carrier})}::jsonb)`;
+        await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'admin.status_changed',${previous.status},${status},${JSON.stringify({tracking_number:tracking,shipping_carrier:carrier,stock_release:stockRelease})}::jsonb)`;
         const notificationType={approved:'payment_approved',processing:'order_processing',shipped:'shipment_created',cancelled:'order_cancelled',refunded:'order_refunded'}[status];
         if(notificationType) await queueAndSendOrderNotification(sql,id,notificationType);
         if(status==='delivered'){await ensureReviewInvites(sql,id);await queueAndSendOrderNotification(sql,id,'review_invite');}
