@@ -1,6 +1,7 @@
 const { getDb } = require('../lib/db');
 const { ensureReviewInvites } = require('../lib/notifications');
 const { searchParams } = require('../lib/request-url');
+const { publicOrderStatus } = require('../lib/order-state');
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
@@ -23,6 +24,7 @@ module.exports = async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'No encontramos un pedido que coincida con ese número y email.' });
 
     const order = rows[0];
+    order.status = publicOrderStatus(order);
     if (order.status === 'delivered') await ensureReviewInvites(sql, order.id);
     const [items, events, reviewInvites] = await Promise.all([
       sql`SELECT product_id,product_title,quantity,unit_price,total_amount FROM order_items WHERE order_id=${order.id} ORDER BY id`,
@@ -38,7 +40,7 @@ module.exports = async (req, res) => {
       }
     }
     const timeline = events
-      .filter(event => ['order.created','payment.created','payment.updated','enviopack.shipment_created','enviopack.synced','enviopack.admin_sync','admin.status_changed'].includes(event.event_type))
+      .filter(event => ['order.created','payment.created','payment.updated','enviopack.shipment_created','enviopack.synced','enviopack.admin_sync','admin.status_changed','checkout.expired'].includes(event.event_type))
       .map(event => ({ type: event.event_type, status: event.new_status, date: event.created_at }));
 
     delete order.id;
@@ -49,7 +51,7 @@ module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json({ order });
   } catch (error) {
-    console.error('estado-pedido error:', error);
+    console.error('estado-pedido error:', 'code=' + String(error?.code || error?.name || 'ORDER_STATUS_ERROR'), 'status=' + String(error?.status || 'unknown'));
     return res.status(500).json({ error: 'No se pudo consultar el pedido.' });
   }
 };
