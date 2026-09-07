@@ -99,3 +99,95 @@ test('errores de autenticación y cotización no filtran contenido sensible al l
   assert.match(rendered, /status=502/);
   assert.match(rendered, /status=503/);
 });
+
+test('los errores JSON de Enviopack no propagan el body del proveedor', async t => {
+  const marker = 'provider-sensitive-message-marker';
+  const previousFetch = global.fetch;
+  const previousApiKey = process.env.ENVIOPACK_API_KEY;
+  const previousSecret = process.env.ENVIOPACK_SECRET_KEY;
+
+  process.env.ENVIOPACK_API_KEY = 'test-api-key';
+  process.env.ENVIOPACK_SECRET_KEY = 'test-secret-key';
+
+  t.after(() => {
+    global.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.ENVIOPACK_API_KEY;
+    else process.env.ENVIOPACK_API_KEY = previousApiKey;
+    if (previousSecret === undefined) delete process.env.ENVIOPACK_SECRET_KEY;
+    else process.env.ENVIOPACK_SECRET_KEY = previousSecret;
+  });
+
+  delete require.cache[require.resolve('../lib/shipping')];
+  const { listLocalities } = require('../lib/shipping');
+
+  let call = 0;
+  global.fetch = async () => {
+    call += 1;
+    if (call === 1) return { ok: true, status: 200, json: async () => ({ access_token: 'test-token' }) };
+    return {
+      ok: false,
+      status: 500,
+      json: async () => ({
+        message: marker,
+        access_token: marker,
+        authorization: `Bearer ${marker}`
+      })
+    };
+  };
+
+  await assert.rejects(
+    listLocalities('C'),
+    error => {
+      assert.equal(error.code, 'SHIPPING_PROVIDER_ERROR');
+      assert.equal(error.providerStatus, 500);
+      assert.equal(error.message, 'Envíopack no pudo procesar la solicitud.');
+      assert.ok(!error.message.includes(marker));
+      return true;
+    }
+  );
+});
+
+test('saldo insuficiente se clasifica sin copiar el mensaje del proveedor', async t => {
+  const marker = 'saldo-provider-secret-marker';
+  const previousFetch = global.fetch;
+  const previousApiKey = process.env.ENVIOPACK_API_KEY;
+  const previousSecret = process.env.ENVIOPACK_SECRET_KEY;
+
+  process.env.ENVIOPACK_API_KEY = 'test-api-key';
+  process.env.ENVIOPACK_SECRET_KEY = 'test-secret-key';
+
+  t.after(() => {
+    global.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.ENVIOPACK_API_KEY;
+    else process.env.ENVIOPACK_API_KEY = previousApiKey;
+    if (previousSecret === undefined) delete process.env.ENVIOPACK_SECRET_KEY;
+    else process.env.ENVIOPACK_SECRET_KEY = previousSecret;
+  });
+
+  delete require.cache[require.resolve('../lib/shipping')];
+  const { listLocalities } = require('../lib/shipping');
+
+  let call = 0;
+  global.fetch = async () => {
+    call += 1;
+    if (call === 1) return { ok: true, status: 200, json: async () => ({ access_token: 'test-token' }) };
+    return { ok: false, status: 402, json: async () => ({ mensaje: `Saldo insuficiente ${marker}` }) };
+  };
+
+  await assert.rejects(
+    listLocalities('C'),
+    error => {
+      assert.equal(error.code, 'INSUFFICIENT_SHIPPING_BALANCE');
+      assert.equal(error.providerStatus, 402);
+      assert.equal(error.message, 'Envíopack informó saldo insuficiente para completar la operación.');
+      assert.ok(!error.message.includes(marker));
+      return true;
+    }
+  );
+});
+
+test('la librería no construye errores con mensajes textuales del proveedor', () => {
+  const shipping = source('lib/shipping.js');
+  assert.doesNotMatch(shipping, /new Error\(providerMessage/);
+  assert.match(shipping, /new Error\(safeMessage\)/);
+});
