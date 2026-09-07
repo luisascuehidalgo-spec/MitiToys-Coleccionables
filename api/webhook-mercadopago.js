@@ -103,7 +103,7 @@ module.exports = async (req, res) => {
           await sql`
             UPDATE orders SET
               customer_id=${customerId},payment_id=${String(payment.id)},
-              payment_status=${payment.status || null},payment_status_detail=${payment.status_detail || null},
+              payment_status='validation_failed',payment_status_detail='amount_or_currency_mismatch',
               updated_at=NOW()
             WHERE id=${order.id}
           `;
@@ -111,7 +111,14 @@ module.exports = async (req, res) => {
             INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
             VALUES(
               ${order.id},'payment.validation_failed',${oldStatus},${oldStatus},
-              ${JSON.stringify({ payment_id: payment.id, status: payment.status, reason: 'amount_or_currency_mismatch' })}::jsonb
+              ${JSON.stringify({
+                payment_id: payment.id,
+                provider_status: payment.status,
+                provider_status_detail: payment.status_detail || null,
+                transaction_amount: payment.transaction_amount,
+                currency_id: payment.currency_id || null,
+                reason: 'amount_or_currency_mismatch'
+              })}::jsonb
             )
           `;
           console.error('Mercado Pago payment validation failed:', 'order_id=' + String(order.id));
