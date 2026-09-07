@@ -11,6 +11,7 @@ const {
   findPaymentsByExternalReference,
   expirePreference
 } = require('../lib/payments');
+const { adminStatusError } = require('../lib/order-state');
 
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -74,10 +75,19 @@ test('cancelación manual invalida la preferencia en Mercado Pago antes de liber
   };
 
   assert.equal(await expirePreference('pref-123', new Date('2026-09-07T20:00:00.000Z')), true);
+  assert.match(
+    adminStatusError({ currentStatus: 'approved', targetStatus: 'cancelled', paymentId: 'pay-1', paymentStatus: 'approved' }),
+    /Mercado Pago/
+  );
+  assert.equal(
+    adminStatusError({ currentStatus: 'pending', targetStatus: 'cancelled', paymentId: null, paymentStatus: 'pending' }),
+    null
+  );
+
   const admin = read('api/admin.js');
+  assert.match(admin, /adminStatusError/);
   assert.match(admin, /await expirePreference\(previous\.preference_id\)/);
   assert.match(admin, /await releaseReservedStock\(sql,id/);
-  assert.match(admin, /payment_id && !\['cancelled','rejected'\]/);
 });
 
 test('liberación de inventario solo suma stock cuando se inserta el primer release', async () => {

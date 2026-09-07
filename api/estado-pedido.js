@@ -38,7 +38,7 @@ module.exports = async (req, res) => {
       }
     }
     const timeline = events
-      .filter(event => ['order.created','payment.created','payment.updated','enviopack.shipment_created','enviopack.synced','enviopack.admin_sync','admin.status_changed'].includes(event.event_type))
+      .filter(event => ['order.created','payment.created','payment.updated','payment.validation_failed','checkout.expired','enviopack.shipment_created','enviopack.synced','enviopack.admin_sync','admin.status_changed'].includes(event.event_type))
       .map(event => ({ type: event.event_type, status: event.new_status, date: event.created_at }));
 
     delete order.id;
@@ -49,7 +49,7 @@ module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json({ order });
   } catch (error) {
-    console.error('estado-pedido error:', error);
+    console.error('estado-pedido error:', 'code=' + String(error?.code || error?.name || 'ORDER_STATUS_ERROR'), 'status=' + String(error?.status || 'unknown'));
     return res.status(500).json({ error: 'No se pudo consultar el pedido.' });
   }
 };
