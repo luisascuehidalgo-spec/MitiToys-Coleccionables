@@ -4,8 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   validateAdminStatusTransition,
-  publicOrderStatus
+  publicOrderStatus,
+  orderStatusFromPaymentEvent,
+  orderStatusFromShippingEvent
 } = require('../lib/order-state');
+const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -44,6 +47,59 @@ test('admin no puede contradecir estados definitivos de Mercado Pago', () => {
   assert.equal(validateAdminStatusTransition({ payment_status: 'pending', payment_id: null }, 'cancelled'), null);
 });
 
+test('webhook aprobado no hace retroceder fulfillment ya avanzado', () => {
+  assert.equal(orderStatusFromPaymentEvent('pending', 'approved'), 'approved');
+  assert.equal(orderStatusFromPaymentEvent('approved', 'approved'), 'approved');
+  assert.equal(orderStatusFromPaymentEvent('processing', 'approved'), 'processing');
+  assert.equal(orderStatusFromPaymentEvent('shipped', 'approved'), 'shipped');
+  assert.equal(orderStatusFromPaymentEvent('delivered', 'approved'), 'delivered');
+  assert.equal(orderStatusFromPaymentEvent('shipped', 'refunded'), 'refunded');
+  assert.equal(orderStatusFromPaymentEvent('processing', 'rejected'), 'cancelled');
+});
+
+test('Enviopack no puede convertir un pago no aprobado en pedido operativo', () => {
+  assert.equal(orderStatusFromShippingEvent({ status: 'pending', payment_status: 'pending' }, 'processing'), 'pending');
+  assert.equal(orderStatusFromShippingEvent({ status: 'refunded', payment_status: 'refunded' }, 'shipped'), 'refunded');
+  assert.equal(orderStatusFromShippingEvent({ status: 'cancelled', payment_status: 'rejected' }, 'delivered'), 'cancelled');
+  assert.equal(orderStatusFromShippingEvent({ status: 'approved', payment_status: 'approved' }, 'processing'), 'processing');
+  assert.equal(orderStatusFromShippingEvent({ status: 'processing', payment_status: 'approved' }, 'shipped'), 'shipped');
+  assert.equal(orderStatusFromShippingEvent({ status: 'shipped', payment_status: 'approved' }, 'delivered'), 'delivered');
+});
+
+test('stock no vuelve al catálogo cuando el despacho ya comenzó', async () => {
+  for (const shippingRow of [
+    { shipping_status: 'preparing', shipping_generation_status: 'created', enviopack_shipment_id: 'ship-1' },
+    { shipping_status: 'preparing', shipping_generation_status: 'processing', enviopack_shipment_id: null },
+    { shipping_status: 'in_transit', shipping_generation_status: 'created', enviopack_shipment_id: null },
+    { shipping_status: 'delivered', shipping_generation_status: 'created', enviopack_shipment_id: null }
+  ]) {
+    let calls = 0;
+    const sql = async () => { calls += 1; return [shippingRow]; };
+    const result = await releaseReservedStockIfUnshipped(sql, 77, 'test');
+    assert.equal(result.skipped, 'shipment_started');
+    assert.deepEqual(result.released, []);
+    assert.equal(calls, 1);
+  }
+});
+
+test('stock sí se libera antes de iniciar despacho y solo mediante release idempotente', async () => {
+  let call = 0;
+  const sql = async (strings) => {
+    call += 1;
+    const text = strings.join('?');
+    if (call === 1) return [{ shipping_status: 'not_shipped', shipping_generation_status: 'not_created', enviopack_shipment_id: null }];
+    if (text.startsWith('SELECT product_id,quantity FROM order_items')) return [{ product_id: '1705', quantity: 1 }];
+    if (text.includes('WITH inserted_release')) {
+      assert.match(text, /ON CONFLICT \(order_id,product_id,movement_type\)/);
+      return [{ id: '1705', quantity: 1 }];
+    }
+    throw new Error('SQL inesperado: ' + text);
+  };
+  const result = await releaseReservedStockIfUnshipped(sql, 77, 'test');
+  assert.equal(result.skipped, null);
+  assert.deepEqual(result.released, [{ product_id: '1705', quantity: 1 }]);
+});
+
 test('endpoint legado de pago está retirado y no contiene lógica de cobro o stock', async () => {
   const legacy = read('api/crear-preferencia.js');
   assert.match(legacy, /LEGACY_CHECKOUT_RETIRED/);
@@ -80,4 +136,25 @@ test('API de seguimiento aplica publicOrderStatus y no loguea el error completo'
   const statusApi = read('api/estado-pedido.js');
   assert.match(statusApi, /order\.status = publicOrderStatus\(order\)/);
   assert.doesNotMatch(statusApi, /console\.error\('estado-pedido error:', error\)/);
+});
+
+test('generación de Enviopack reclama el pedido solo si el pago sigue aprobado', () => {
+  const admin = read('api/admin.js');
+  assert.match(admin, /WHERE id=\$\{id\} AND payment_status='approved' AND enviopack_shipment_id IS NULL/);
+  assert.match(admin, /orderStatusFromShippingEvent\(order, state\.order\)/);
+  assert.match(admin, /releaseReservedStockIfUnshipped/);
+});
+
+test('sync automático de Enviopack respeta la verdad del pago', () => {
+  const envios = read('api/envios.js');
+  assert.match(envios, /SELECT id,tracking_number,status,payment_status FROM orders/);
+  assert.match(envios, /orderStatusFromShippingEvent\(orders\[0\], state\.order\)/);
+});
+
+test('webhook Mercado Pago usa transición monotónica y nunca repone stock enviado', () => {
+  const webhook = read('api/webhook-mercadopago.js');
+  assert.match(webhook, /orderStatusFromPaymentEvent\(oldStatus, payment\.status\)/);
+  assert.match(webhook, /releaseReservedStockIfUnshipped/);
+  assert.doesNotMatch(webhook, /statusToOrderStatus/);
+  assert.doesNotMatch(webhook, /releaseReservedStock\(sql/);
 });
