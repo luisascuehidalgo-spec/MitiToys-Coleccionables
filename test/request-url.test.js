@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { searchParams } = require('../lib/request-url');
 
+// Regression guard for Vercel Node runtimes: API code must parse req.url directly.
 test('parsea query params con WHATWG URL sin depender de req.query', () => {
   const query = searchParams({ url: '/api/productos?id=3377&review_token=a%20b&data.id=123' });
   assert.equal(query.get('id'), '3377');
