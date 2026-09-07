@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
-const { releaseReservedStock } = require('../lib/inventory');
+const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { orderStatusFromPayment } = require('../lib/order-state');
 const { queueAndSendOrderNotification } = require('../lib/notifications');
 
@@ -134,8 +134,9 @@ module.exports = async (req, res) => {
           WHERE id=${order.id}
         `;
 
+        let stockRelease = null;
         if (newStatus === 'cancelled' || newStatus === 'refunded') {
-          await releaseReservedStock(
+          stockRelease = await releaseReservedStockIfUnshipped(
             sql,
             order.id,
             newStatus === 'refunded' ? 'Liberación por reembolso' : 'Liberación por rechazo/cancelación'
@@ -151,7 +152,8 @@ module.exports = async (req, res) => {
               status: payment.status,
               status_detail: payment.status_detail,
               transaction_amount: payment.transaction_amount,
-              currency_id: payment.currency_id || null
+              currency_id: payment.currency_id || null,
+              stock_release: stockRelease
             })}::jsonb
           )
         `;
