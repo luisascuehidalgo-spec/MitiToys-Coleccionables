@@ -37,8 +37,8 @@ module.exports = async (req, res) => {
         WHERE r.review_token=${token} AND o.status='delivered' LIMIT 1
       `;
       if (!rows.length) return res.status(404).json({ error: 'Este enlace de opinión no es válido o el pedido todavía no fue entregado.' });
-      const image = await sql`SELECT id FROM product_images WHERE product_id=${rows[0].product_id} ORDER BY sort_order,id LIMIT 1`;
-      return res.status(200).json({ review: { ...rows[0], image: image.length ? '/api/product-image?id=' + image[0].id : rows[0].legacy_image } });
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(200).json({ review: { ...rows[0], image: rows[0].legacy_image } });
     }
 
     if (req.method === 'POST') {
@@ -55,6 +55,7 @@ module.exports = async (req, res) => {
         RETURNING r.id,r.product_id,r.rating,r.status
       `;
       if (!rows.length) return res.status(404).json({ error: 'Este enlace de opinión no es válido.' });
+      res.setHeader('Cache-Control', 'private, no-store');
       return res.status(200).json({ ok: true, review: rows[0] });
     }
 
@@ -76,17 +77,12 @@ module.exports = async (req, res) => {
           FROM products p LEFT JOIN reviews r ON r.product_id=p.id
           WHERE p.active=true GROUP BY p.id ORDER BY p.title
         `;
-    const uploaded = await sql`SELECT id,product_id,sort_order FROM product_images ORDER BY product_id,sort_order,id`;
-    const byProduct = new Map();
-    for (const image of uploaded) {
-      if (!byProduct.has(image.product_id)) byProduct.set(image.product_id, []);
-      byProduct.get(image.product_id).push({ id: image.id, url: `/api/product-image?id=${image.id}`, sort_order: image.sort_order });
-    }
-    const result = products.map(product => {
-      const legacy = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
-      const stored = byProduct.get(product.id) || [];
-      return { ...product, rating: Number(product.rating || 0), reviews_count: Number(product.reviews_count || 0), images: [...legacy, ...stored.map(image => image.url)].slice(0, 8) };
-    });
+    const result = products.map(product => ({
+      ...product,
+      rating: Number(product.rating || 0),
+      reviews_count: Number(product.reviews_count || 0),
+      images: Array.isArray(product.images) ? product.images.filter(Boolean).slice(0, 8) : []
+    }));
     let reviews = [];
     if (productId) {
       reviews = await sql`
@@ -96,7 +92,7 @@ module.exports = async (req, res) => {
         ORDER BY r.published_at DESC LIMIT 20
       `;
     }
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
     return res.status(200).json({ products: result, reviews });
   } catch (error) {
     console.error('products api error:', error);
