@@ -3,7 +3,7 @@ const { verify } = require('./admin-auth');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStock } = require('../lib/inventory');
 const { expirePreference } = require('../lib/payments');
-const { adminStatusError } = require('../lib/order-state');
+const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
   getShipment, getShipmentTracking, getShipmentLabel
@@ -103,6 +103,8 @@ async function createShipment(sql, id) {
     const providerShipmentState = String(shipment.estado || '');
     const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;
     const labelReady = providerShipmentState.toUpperCase() === 'P';
+    const nextOrderStatus = orderStatusFromShipping(order.status, order.payment_status, 'processing');
+    const nextShippingStatus = shippingStatusFromProvider(order.shipping_status, 'preparing');
     await sql`
       UPDATE orders SET
         enviopack_shipment_id=${shipmentId},enviopack_state=${providerShipmentState || null},
@@ -111,11 +113,11 @@ async function createShipment(sql, id) {
         shipping_branch_id=${order.shipping_branch_id || null},shipping_branch_name=${order.shipping_branch_name || null},
         shipping_branch_address=${order.shipping_branch_address || null},
         tracking_number=${trackingNumber},shipping_label_ready=${labelReady},
-        shipping_generation_status='created',shipping_status='preparing',status='processing',
+        shipping_generation_status='created',shipping_status=${nextShippingStatus},status=${nextOrderStatus},
         shipping_created_at=NOW(),shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
       WHERE id=${id}
     `;
-    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created','processing',${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;
+    await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.shipment_created',${order.status},${nextOrderStatus},${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, applied_shipping_status: nextShippingStatus, tracking_number: trackingNumber })}::jsonb)`;
     if (trackingNumber) await queueAndSendOrderNotification(sql, id, 'shipment_created');
     return { reused: false, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady };
   } catch (error) {
@@ -136,20 +138,22 @@ async function syncShipment(sql, id) {
   }
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking || order.tracking_number, 120) || null;
   const state = providerState(details, tracking);
+  const nextOrderStatus = orderStatusFromShipping(order.status, order.payment_status, state.order);
+  const nextShippingStatus = shippingStatusFromProvider(order.shipping_status, state.shipping);
   const labelReady = String(details?.estado || '').toUpperCase() === 'P';
   await sql`
     UPDATE orders SET enviopack_state=${String(details?.estado || '') || null},tracking_number=${trackingNumber},
-      shipping_label_ready=${labelReady},shipping_status=${state.shipping},status=${state.order},
+      shipping_label_ready=${labelReady},shipping_status=${nextShippingStatus},status=${nextOrderStatus},
       shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
     WHERE id=${id}
   `;
-  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${state.order},${JSON.stringify({ tracking_number: trackingNumber, tracking })}::jsonb)`;
+  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${nextOrderStatus},${JSON.stringify({ proposed_order_status: state.order, proposed_shipping_status: state.shipping, applied_shipping_status: nextShippingStatus, tracking_number: trackingNumber, tracking })}::jsonb)`;
   if (trackingNumber && trackingNumber !== order.tracking_number) await queueAndSendOrderNotification(sql, id, 'shipment_created');
-  if (state.order === 'delivered') {
+  if (nextOrderStatus === 'delivered') {
     await ensureReviewInvites(sql, id);
     await queueAndSendOrderNotification(sql, id, 'review_invite');
   }
-  return { cached: false, tracking_number: trackingNumber, label_ready: labelReady, shipping_status: state.shipping, events: tracking };
+  return { cached: false, tracking_number: trackingNumber, label_ready: labelReady, shipping_status: nextShippingStatus, order_status: nextOrderStatus, events: tracking };
 }
 
 module.exports = async (req,res)=>{
