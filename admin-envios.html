@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Mititoys · Configuración de envíos</title>
   <style>
-    :root{--yellow:#ffd21c;--red:#ef2525;--bg:#070707;--card:#121212;--line:#2c2c2c;--muted:#aaa;--green:#74dc70}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:1120px;margin:auto;padding:30px 18px 60px}a{color:var(--yellow);text-decoration:none}.box{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:21px;margin:18px 0}.hidden{display:none}h1,h2{color:var(--yellow)}.muted{color:var(--muted);line-height:1.5}.bad{color:#ff7373}.ok{color:var(--green)}input,button{padding:11px;border-radius:8px;border:1px solid #444;background:#181818;color:#fff}button{background:var(--red);font-weight:900;cursor:pointer}.products{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.product{background:#0e0e0e;border:1px solid var(--line);border-radius:12px;padding:17px}.product h3{font-size:17px;margin:0 0 5px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px}label{display:grid;gap:6px;color:#ddd;font-size:13px;font-weight:700}input{width:100%}.status{font-size:13px;font-weight:800;margin-top:8px}.save{width:100%;margin-top:14px}.notice{border-left:4px solid var(--yellow);padding-left:13px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}@media(max-width:760px){.products,.grid{grid-template-columns:1fr}.top{display:block}}
+    :root{--yellow:#ffd21c;--red:#ef2525;--bg:#070707;--card:#121212;--line:#2c2c2c;--muted:#aaa;--green:#74dc70}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:Arial,Helvetica,sans-serif}.wrap{max-width:1120px;margin:auto;padding:30px 18px 60px}a{color:var(--yellow);text-decoration:none}.box{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:21px;margin:18px 0}.hidden{display:none}h1,h2{color:var(--yellow)}.muted{color:var(--muted);line-height:1.5}.bad{color:#ff7373}.ok{color:var(--green)}.recovered{color:var(--yellow)}input,button{padding:11px;border-radius:8px;border:1px solid #444;background:#181818;color:#fff}button{background:var(--red);font-weight:900;cursor:pointer}.products{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}.product{background:#0e0e0e;border:1px solid var(--line);border-radius:12px;padding:17px}.product h3{font-size:17px;margin:0 0 5px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:14px}label{display:grid;gap:6px;color:#ddd;font-size:13px;font-weight:700}input{width:100%}.status{font-size:13px;font-weight:800;margin-top:8px}.save{width:100%;margin-top:14px}.notice{border-left:4px solid var(--yellow);padding-left:13px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px}@media(max-width:760px){.products,.grid{grid-template-columns:1fr}.top{display:block}}
   </style>
 </head>
 <body>
@@ -28,9 +28,61 @@
   </main>
   <script>
     let products = [];
+    const BACKUP_KEY = 'mititoys_shipping_backup_v1';
+    const SHIPPING_FIELDS = ['weight_kg','package_length_cm','package_width_cm','package_height_cm'];
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[char]));
     const value = id => document.getElementById(id)?.value || '';
     const numberOrNull = id => Number(value(id)) > 0 ? Number(value(id)) : null;
+
+    function readBackups() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(BACKUP_KEY) || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch { return {}; }
+    }
+
+    function writeBackups(backups) {
+      try { localStorage.setItem(BACKUP_KEY, JSON.stringify(backups)); } catch {}
+    }
+
+    function shippingSnapshot(source) {
+      const snapshot = {};
+      for (const key of SHIPPING_FIELDS) snapshot[key] = Number(source?.[key]) > 0 ? Number(source[key]) : null;
+      return snapshot;
+    }
+
+    function saveBackup(id, shipping) {
+      const snapshot = shippingSnapshot(shipping);
+      if (!Object.values(snapshot).every(item => Number(item) > 0)) return;
+      const backups = readBackups();
+      backups[String(id)] = { ...snapshot, saved_at:new Date().toISOString() };
+      writeBackups(backups);
+    }
+
+    function reconcileBackups(list) {
+      const backups = readBackups();
+      let changed = false;
+      for (const product of list) {
+        const id = String(product.id);
+        if (ready(product)) {
+          backups[id] = { ...shippingSnapshot(product), saved_at:new Date().toISOString() };
+          changed = true;
+          continue;
+        }
+        const backup = backups[id];
+        if (!backup || !ready(backup)) continue;
+        let recovered = false;
+        for (const key of SHIPPING_FIELDS) {
+          if (!(Number(product[key]) > 0) && Number(backup[key]) > 0) {
+            product[key] = Number(backup[key]);
+            recovered = true;
+          }
+        }
+        if (recovered) product._recoveredFromBackup = true;
+      }
+      if (changed) writeBackups(backups);
+      return list;
+    }
 
     async function login() {
       const error = document.getElementById('loginError');
@@ -44,13 +96,19 @@
     }
 
     function ready(product) {
-      return [product.weight_kg, product.package_length_cm, product.package_width_cm, product.package_height_cm].every(item => Number(item) > 0);
+      return SHIPPING_FIELDS.every(key => Number(product?.[key]) > 0);
     }
 
     function render() {
       const completed = products.filter(ready).length;
-      document.getElementById('summary').textContent = `${completed} de ${products.length} productos listos para cotizar envíos.`;
-      document.getElementById('products').innerHTML = products.map(product => `<article class="product"><h3>${esc(product.title)}</h3><div class="muted">COD ${esc(product.id)}</div><div class="status ${ready(product) ? 'ok' : 'bad'}">${ready(product) ? '✓ Listo para cotizar' : '⚠ Faltan peso o medidas'}</div><div class="grid"><label>Peso embalado (kg)<input id="weight-${esc(product.id)}" type="number" min="0.01" step="0.01" value="${product.weight_kg || ''}" placeholder="Ej: 1.50"></label><label>Largo (cm)<input id="length-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_length_cm || ''}" placeholder="Ej: 35"></label><label>Ancho (cm)<input id="width-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_width_cm || ''}" placeholder="Ej: 25"></label><label>Alto (cm)<input id="height-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_height_cm || ''}" placeholder="Ej: 40"></label></div><button class="save" type="button" onclick="save('${esc(product.id)}')">GUARDAR DATOS DE ENVÍO</button><p id="state-${esc(product.id)}" class="muted"></p></article>`).join('');
+      const recovered = products.filter(product => product._recoveredFromBackup).length;
+      document.getElementById('summary').textContent = `${completed} de ${products.length} productos listos para cotizar envíos.${recovered ? ` ${recovered} recuperado(s) desde la copia local: presioná GUARDAR para volver a grabarlos en el servidor.` : ''}`;
+      document.getElementById('products').innerHTML = products.map(product => {
+        const recovered = Boolean(product._recoveredFromBackup);
+        const statusClass = recovered ? 'recovered' : ready(product) ? 'ok' : 'bad';
+        const statusText = recovered ? '↺ Datos recuperados de la copia local — guardalos nuevamente' : ready(product) ? '✓ Listo para cotizar' : '⚠ Faltan peso o medidas';
+        return `<article class="product"><h3>${esc(product.title)}</h3><div class="muted">COD ${esc(product.id)}</div><div class="status ${statusClass}">${statusText}</div><div class="grid"><label>Peso embalado (kg)<input id="weight-${esc(product.id)}" type="number" min="0.01" step="0.01" value="${product.weight_kg || ''}" placeholder="Ej: 1.50"></label><label>Largo (cm)<input id="length-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_length_cm || ''}" placeholder="Ej: 35"></label><label>Ancho (cm)<input id="width-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_width_cm || ''}" placeholder="Ej: 25"></label><label>Alto (cm)<input id="height-${esc(product.id)}" type="number" min="1" step="1" value="${product.package_height_cm || ''}" placeholder="Ej: 40"></label></div><button class="save" type="button" onclick="save('${esc(product.id)}')">GUARDAR DATOS DE ENVÍO</button><p id="state-${esc(product.id)}" class="muted"></p></article>`;
+      }).join('');
     }
 
     async function load() {
@@ -60,7 +118,7 @@
       if (response.status === 401) { location.reload(); return; }
       const data = await response.json().catch(() => ({}));
       if (!response.ok) { error.textContent = data.error || 'No se pudieron cargar los productos.'; return; }
-      products = Array.isArray(data.products) ? data.products : [];
+      products = reconcileBackups(Array.isArray(data.products) ? data.products : []);
       render();
     }
 
@@ -88,7 +146,8 @@
       }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) { state.className = 'bad'; state.textContent = data.error || 'No se pudo guardar.'; return; }
-      state.className = 'ok'; state.textContent = '✓ Datos guardados';
+      saveBackup(id, shipping);
+      state.className = 'ok'; state.textContent = '✓ Datos guardados y respaldados';
       await load();
     }
 
