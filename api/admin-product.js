@@ -16,13 +16,18 @@ function parseImages(value) {
 
 const SHIPPING_FIELDS = ['weight_kg', 'package_length_cm', 'package_width_cm', 'package_height_cm'];
 
-function logistics(body, fallback = {}) {
+function logistics(body, fallback = {}, preserveExisting = false) {
   const source = body || {};
   const values = {};
   for (const key of SHIPPING_FIELDS) {
-    const raw = Object.prototype.hasOwnProperty.call(source, key) ? source[key] : fallback?.[key];
-    const value = Number(raw);
-    values[key] = Number.isFinite(value) && value > 0 ? value : null;
+    const supplied = Object.prototype.hasOwnProperty.call(source, key);
+    const candidate = Number(source[key]);
+    if (supplied && Number.isFinite(candidate) && candidate > 0) {
+      values[key] = candidate;
+      continue;
+    }
+    const previous = Number(fallback?.[key]);
+    values[key] = preserveExisting && Number.isFinite(previous) && previous > 0 ? previous : null;
   }
   return values;
 }
@@ -62,7 +67,7 @@ module.exports = async (req, res) => {
       if (!id || !title || !Number.isInteger(stock) || stock < 0 || !Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Datos de producto inválidos.' });
       const current = await sql`SELECT stock_quantity,images,weight_kg,package_length_cm,package_width_cm,package_height_cm FROM products WHERE id=${id}`;
       if (!current.length) return res.status(404).json({ error: 'Producto no encontrado.' });
-      const shipping = logistics(req.body, current[0]);
+      const shipping = logistics(req.body, current[0], true);
       const originalImages = req.body?.original_images ?? current[0].images ?? [];
       const uploaded = await sql`SELECT COUNT(*)::int AS count FROM product_images WHERE product_id=${id}`;
       if (images.length + Number(uploaded[0]?.count || 0) > 8) return res.status(400).json({ error: 'Este producto supera el máximo de 8 fotos.' });
