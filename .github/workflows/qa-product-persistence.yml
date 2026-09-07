@@ -9,44 +9,13 @@ on:
       - main
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout PR head
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
-          fetch-depth: 0
-      - name: Apply one-time checkout product image retirement
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          checkout = Path('api/crear-preferencia-carrito.js')
-          source = checkout.read_text()
-          source = source.replace('      const legacyImages = Array.isArray(product.images) ? product.images : [];\n', '      const productImages = Array.isArray(product.images) ? product.images.filter(Boolean) : [];\n')
-          source = source.replace('      if (legacyImages[0]) pictureUrl = String(legacyImages[0]);\n', '      if (productImages[0]) pictureUrl = String(productImages[0]);\n')
-          source = source.replace('      const uploaded = await sql`SELECT id FROM product_images WHERE product_id=${requested.id} ORDER BY sort_order,id LIMIT 1`;\n', '')
-          source = source.replace('      if (uploaded.length) pictureUrl = `${origin}/api/product-image?id=${uploaded[0].id}`;\n', '')
-          checkout.write_text(source)
-          test_file = Path('test/neon-transfer-regression.test.js')
-          tests = test_file.read_text()
-          marker = "test('API pública de productos no consulta product_images y usa caché CDN corta', () => {"
-          addition = "test('checkout server no consulta ni publica imágenes binarias de Neon', () => {\n  const checkout = read('api/crear-preferencia-carrito.js');\n  assert.doesNotMatch(checkout, /product_images/);\n  assert.doesNotMatch(checkout, /\\/api\\/product-image/);\n});\n\n"
-          if addition not in tests:
-              if marker not in tests:
-                  raise SystemExit('regression insertion marker not found')
-              test_file.write_text(tests.replace(marker, addition + marker))
-          final_source = checkout.read_text()
-          if 'product_images' in final_source or '/api/product-image' in final_source:
-              raise SystemExit('checkout still contains legacy binary image dependency')
-          PY
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -55,17 +24,3 @@ jobs:
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run test suite
         run: npm test
-      - name: Commit fix and restore workflow
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          git fetch origin main
-          git checkout origin/main -- .github/workflows/qa-product-persistence.yml
-          if git diff --quiet; then
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add api/crear-preferencia-carrito.js test/neon-transfer-regression.test.js .github/workflows/qa-product-persistence.yml
-          git commit -m 'Retire Neon binary images from checkout'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
