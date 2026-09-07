@@ -3,7 +3,7 @@ const { verify } = require('./admin-auth');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { expirePreference } = require('../lib/payments');
-const { adminStatusError, orderStatusFromShipping } = require('../lib/order-state');
+const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
   getShipment, getShipmentTracking, getShipmentLabel
@@ -64,7 +64,7 @@ async function createShipment(sql, id) {
 
   const claim = await sql`
     UPDATE orders SET shipping_generation_status='processing',shipping_last_error=NULL,updated_at=NOW()
-    WHERE id=${id} AND payment_status='approved' AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')
+    WHERE id=${id} AND payment_status='approved' AND status NOT IN ('cancelled','refunded') AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')
     RETURNING id
   `;
   if (!claim.length) throw Object.assign(new Error('El envío ya se está generando o el pago dejó de estar aprobado. Actualizá el panel antes de reintentar.'), { status: 409 });
@@ -87,8 +87,8 @@ async function createShipment(sql, id) {
 
     const items = await sql`SELECT product_id,product_title,quantity FROM order_items WHERE order_id=${id} ORDER BY id`;
     const packages = await packagesForOrder(sql, order);
-    const firstPaymentGuard = await sql`SELECT payment_status FROM orders WHERE id=${id} LIMIT 1`;
-    if (!firstPaymentGuard.length || firstPaymentGuard[0].payment_status !== 'approved') {
+    const firstPaymentGuard = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
+    if (!firstPaymentGuard.length || firstPaymentGuard[0].payment_status !== 'approved' || ['cancelled','refunded'].includes(String(firstPaymentGuard[0].status || ''))) {
       throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de iniciar el despacho.'), { status: 409, code: 'PAYMENT_CHANGED_DURING_SHIPMENT' });
     }
     const providerOrderId = order.enviopack_order_id || await getOrCreateEnviopackOrder({
@@ -97,8 +97,8 @@ async function createShipment(sql, id) {
       items
     });
     await sql`UPDATE orders SET enviopack_order_id=${providerOrderId},updated_at=NOW() WHERE id=${id}`;
-    const secondPaymentGuard = await sql`SELECT payment_status FROM orders WHERE id=${id} LIMIT 1`;
-    if (!secondPaymentGuard.length || secondPaymentGuard[0].payment_status !== 'approved') {
+    const secondPaymentGuard = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
+    if (!secondPaymentGuard.length || secondPaymentGuard[0].payment_status !== 'approved' || ['cancelled','refunded'].includes(String(secondPaymentGuard[0].status || ''))) {
       throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de confirmar el despacho.'), { status: 409, code: 'PAYMENT_CHANGED_DURING_SHIPMENT' });
     }
 
@@ -114,9 +114,10 @@ async function createShipment(sql, id) {
     const providerShipmentState = String(shipment.estado || '');
     const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;
     const labelReady = providerShipmentState.toUpperCase() === 'P';
-    const currentRows = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
+    const currentRows = await sql`SELECT status,payment_status,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
     const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
     const finalOrderStatus = orderStatusFromShipping(currentOrder, 'processing');
+    const finalShippingStatus = shippingStatusFromProvider(currentOrder.shipping_status, 'preparing');
     const updated = await sql`
       UPDATE orders SET
         enviopack_shipment_id=${shipmentId},enviopack_state=${providerShipmentState || null},
@@ -125,7 +126,7 @@ async function createShipment(sql, id) {
         shipping_branch_id=${order.shipping_branch_id || null},shipping_branch_name=${order.shipping_branch_name || null},
         shipping_branch_address=${order.shipping_branch_address || null},
         tracking_number=${trackingNumber},shipping_label_ready=${labelReady},
-        shipping_generation_status='created',shipping_status='preparing',status=${finalOrderStatus},
+        shipping_generation_status='created',shipping_status=${finalShippingStatus},status=${finalOrderStatus},
         shipping_created_at=NOW(),shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
       WHERE id=${id}
       RETURNING status,payment_status
@@ -138,14 +139,15 @@ async function createShipment(sql, id) {
       const recoveredShipmentId = String(providerShipment.id);
       const recoveredProviderState = String(providerShipment.estado || '');
       try {
-        const currentRows = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
+        const currentRows = await sql`SELECT status,payment_status,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
         const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
         const recoveredOrderStatus = orderStatusFromShipping(currentOrder, 'processing');
+        const recoveredShippingStatus = shippingStatusFromProvider(currentOrder.shipping_status, 'preparing');
         await sql`
           UPDATE orders SET
             enviopack_shipment_id=COALESCE(enviopack_shipment_id,${recoveredShipmentId}),
             enviopack_state=COALESCE(enviopack_state,${recoveredProviderState || null}),
-            shipping_generation_status='created',status=${recoveredOrderStatus},
+            shipping_generation_status='created',shipping_status=${recoveredShippingStatus},status=${recoveredOrderStatus},
             shipping_last_error=${clean('El envío fue creado en Envíopack, pero una etapa posterior no se completó. Sincronizá el tracking antes de realizar otra acción.', 1000)},
             updated_at=NOW()
           WHERE id=${id}
@@ -186,6 +188,7 @@ async function syncShipment(sql, id) {
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking || order.tracking_number, 120) || null;
   const state = providerState(details, tracking);
   state.order = orderStatusFromShipping(order, state.order);
+  state.shipping = shippingStatusFromProvider(order.shipping_status, state.shipping);
   const labelReady = String(details?.estado || '').toUpperCase() === 'P';
   await sql`
     UPDATE orders SET enviopack_state=${String(details?.estado || '') || null},tracking_number=${trackingNumber},

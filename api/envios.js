@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStock } = require('../lib/inventory');
-const { orderStatusFromShipping } = require('../lib/order-state');
+const { orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');
 const { findPaymentsByExternalReference } = require('../lib/payments');
 const {
   shippingEnabled, normalizePostalCode, normalizeProvinceCode, normalizeCart, cartHash,
@@ -23,7 +23,7 @@ function shipmentState(details, tracking) {
 }
 
 async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
-  const orders = await sql`SELECT id,tracking_number,status,payment_status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1`;
+  const orders = await sql`SELECT id,tracking_number,status,payment_status,shipping_status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1`;
   if (!orders.length) return null;
   const details = await getShipment(shipmentId);
   let tracking = [];
@@ -33,6 +33,7 @@ async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
   const trackingNumber = String(details?.tracking_number || details?.numero_tracking || orders[0].tracking_number || '').trim() || null;
   const state = shipmentState(details, tracking);
   state.order = orderStatusFromShipping(orders[0], state.order);
+  state.shipping = shippingStatusFromProvider(orders[0].shipping_status, state.shipping);
   const labelReady = String(details?.estado || '').toUpperCase() === 'P';
   await sql`
     UPDATE orders SET
