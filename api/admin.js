@@ -93,6 +93,12 @@ async function createShipment(sql, id) {
     });
     await sql`UPDATE orders SET enviopack_order_id=${providerOrderId},updated_at=NOW() WHERE id=${id}`;
 
+    const paymentGuard = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
+    if (!paymentGuard.length || paymentGuard[0].payment_status !== 'approved') {
+      await sql`UPDATE orders SET shipping_generation_status='failed',shipping_last_error='El pago dejó de estar aprobado antes de confirmar el envío.',updated_at=NOW() WHERE id=${id}`;
+      throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de confirmar el envío. No se generó el despacho.'), { status: 409 });
+    }
+
     const shipment = await createConfirmedShipment({
       providerOrderId,
       order,
@@ -103,7 +109,10 @@ async function createShipment(sql, id) {
     const providerShipmentState = String(shipment.estado || '');
     const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;
     const labelReady = providerShipmentState.toUpperCase() === 'P';
-    await sql`
+    const currentRows = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
+    const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
+    const finalOrderStatus = orderStatusFromShippingEvent(currentOrder, 'processing');
+    const updated = await sql`
       UPDATE orders SET
         enviopack_shipment_id=${shipmentId},enviopack_state=${providerShipmentState || null},
         shipping_destination_type=${order.shipping_destination_type},
@@ -111,13 +120,14 @@ async function createShipment(sql, id) {
         shipping_branch_id=${order.shipping_branch_id || null},shipping_branch_name=${order.shipping_branch_name || null},
         shipping_branch_address=${order.shipping_branch_address || null},
         tracking_number=${trackingNumber},shipping_label_ready=${labelReady},
-        shipping_generation_status='created',shipping_status='preparing',status='processing',
+        shipping_generation_status='created',shipping_status='preparing',status=${finalOrderStatus},
         shipping_created_at=NOW(),shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
       WHERE id=${id}
+      RETURNING status,payment_status
     `;
-    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created','processing',${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;
-    if (trackingNumber) await queueAndSendOrderNotification(sql, id, 'shipment_created');
-    return { reused: false, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady };
+    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created',${finalOrderStatus},${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;
+    if (trackingNumber && updated[0]?.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
+    return { reused: false, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady, order_status: finalOrderStatus };
   } catch (error) {
     await sql`UPDATE orders SET shipping_generation_status='failed',shipping_last_error=${clean(error.message, 1000)},updated_at=NOW() WHERE id=${id}`;
     throw error;
@@ -145,7 +155,7 @@ async function syncShipment(sql, id) {
     WHERE id=${id}
   `;
   await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${state.order},${JSON.stringify({ tracking_number: trackingNumber, tracking })}::jsonb)`;
-  if (trackingNumber && trackingNumber !== order.tracking_number) await queueAndSendOrderNotification(sql, id, 'shipment_created');
+  if (trackingNumber && trackingNumber !== order.tracking_number && order.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
   if (state.order === 'delivered') {
     await ensureReviewInvites(sql, id);
     await queueAndSendOrderNotification(sql, id, 'review_invite');
