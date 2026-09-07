@@ -16,8 +16,8 @@ test('catálogo público no fuerza cache miss ni referencia imágenes binarias d
   assert.match(catalog, /mititoys_catalog_cache_v4/);
 });
 
-test('ficha, carrito y checkout usan el catálogo estable y no imágenes binarias', () => {
-  for (const file of ['producto.html', 'carrito.html', 'checkout.html']) {
+test('home, ficha, carrito y checkout no dependen de imágenes binarias de Neon', () => {
+  for (const file of ['index.html', 'producto.html', 'carrito.html', 'checkout.html']) {
     const source = read(file);
     assert.doesNotMatch(source, /\/api\/productos\?cb=/, `${file} volvió a forzar cache-busting del catálogo`);
     assert.doesNotMatch(source, /\/api\/product-image/, `${file} volvió a depender de imágenes binarias de Neon`);
