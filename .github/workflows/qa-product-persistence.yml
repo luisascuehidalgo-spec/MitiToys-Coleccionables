@@ -1,9 +1,9 @@
-name: QA Product Persistence
+name: Product Persistence Regression
 
 on:
   push:
     branches:
-      - qa/product-persistence-20260907
+      - main
   pull_request:
     branches:
       - main
