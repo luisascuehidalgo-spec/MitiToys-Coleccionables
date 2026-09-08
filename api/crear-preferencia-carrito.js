@@ -7,7 +7,7 @@ const {
   cartHash
 } = require('../lib/shipping');
 const { reserveStock, releaseReservedStock } = require('../lib/inventory');
-const { PUBLIC_BASE_URL, preferenceWindow } = require('../lib/payments');
+const { PUBLIC_BASE_URL, preferenceWindow, createPreferenceWithReconciliation } = require('../lib/payments');
 
 const clean = (value, max = 200) => String(value || '').trim().slice(0, max);
 const PRODUCTOS = {
@@ -196,19 +196,31 @@ module.exports = async (req, res) => {
       ...preferenceWindow()
     };
 
-    const mercadoPagoResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}` },
-      body: JSON.stringify(preference)
-    });
-    const mercadoPago = await mercadoPagoResponse.json().catch(() => ({}));
-    if (!mercadoPagoResponse.ok || !mercadoPago.init_point) throw new Error('Mercado Pago rechazó la creación del pago.');
+    let mercadoPago;
+    try {
+      mercadoPago = await createPreferenceWithReconciliation(preference, externalReference);
+    } catch (preferenceError) {
+      if (preferenceError?.code !== 'MP_PREFERENCE_UNCERTAIN') throw preferenceError;
+      try { await sql`UPDATE orders SET payment_status_detail='preference_uncertain',updated_at=NOW() WHERE id=${orderId}`; } catch (_) {}
+      try {
+        await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${orderId},'payment.preference_uncertain','pending',${JSON.stringify({ external_reference: externalReference })}::jsonb)`;
+      } catch (_) {}
+      return res.status(202).json({
+        init_point: `${origin}/pedido.html?pedido=${encodeURIComponent(orderNumber)}&pago=verificando`,
+        pending_confirmation: true,
+        order_number: orderNumber,
+        subtotal,
+        shipping_amount: shippingAmount,
+        total
+      });
+    }
 
-    await sql`UPDATE orders SET preference_id=${mercadoPago.id},payment_url=${mercadoPago.init_point} WHERE id=${orderId}`;
+    await sql`UPDATE orders SET preference_id=${mercadoPago.id},payment_url=${mercadoPago.init_point},payment_status_detail=NULL,updated_at=NOW() WHERE id=${orderId}`;
     await sql`
       INSERT INTO order_events(order_id,event_type,new_status,payload)
       VALUES(${orderId},'order.created','pending',${JSON.stringify({
         preference_id: mercadoPago.id,
+        preference_recovered: mercadoPago.recovered === true,
         multi_product: true,
         subtotal,
         shipping: shipping ? { quote_id: shippingQuoteId, type: shipping.destination_type, carrier: shipping.carrier_name, service: shipping.service_name, amount: shippingAmount, estimated_hours: shipping.estimated_hours, branch: shipping.branch_name || null } : null,
