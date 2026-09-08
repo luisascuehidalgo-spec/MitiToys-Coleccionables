@@ -1,0 +1,40 @@
+name: Apply payment validation alert
+on:
+  push:
+    branches: [fix/payment-validation-alert-20260908]
+    paths: [.github/workflows/apply-payment-validation-alert-temp.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/payment-validation-alert-20260908
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Add admin payment validation warning
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('admin.html')
+          s=p.read_text()
+          old='<td>${esc(o.payment_status||\'pending\')}<br><span class="muted small">${esc(o.payment_status_detail||\'\')}</span>${o.payment_status_detail===\'late_approval_conflict\'?\'<br><span class="small bad">⚠ PAGO APROBADO DESPUÉS DEL CIERRE · REVISAR / REEMBOLSAR</span>\':\'\'}</td>'
+          new='<td>${esc(o.payment_status||\'pending\')}<br><span class="muted small">${esc(o.payment_status_detail||\'\')}</span>${o.payment_status_detail===\'late_approval_conflict\'?\'<br><span class="small bad">⚠ PAGO APROBADO DESPUÉS DEL CIERRE · REVISAR / REEMBOLSAR</span>\':\'\'}${o.payment_status_detail===\'amount_or_currency_mismatch\'?\'<br><span class="small bad">⚠ PAGO CON IMPORTE O MONEDA INVÁLIDOS · REVISAR EN MERCADO PAGO</span>\':\'\'}</td>'
+          if old not in s: raise SystemExit('payment warning target not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Run regression suite
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/apply-payment-validation-alert-temp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add admin.html .github/workflows/apply-payment-validation-alert-temp.yml
+          git commit -m "Highlight payment validation failures in admin"
+          git push origin HEAD:fix/payment-validation-alert-20260908
