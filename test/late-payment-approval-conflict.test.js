@@ -39,6 +39,10 @@ test('admin nunca puede revivir cancelled/refunded aunque payment_status sea app
     ['cancelled']
   );
   assert.deepEqual(
+    adminStatusOptions({ status: 'refunded', payment_status: 'approved', payment_id: 'mp-1' }),
+    ['refunded']
+  );
+  assert.deepEqual(
     adminStatusOptions({ status: 'refunded', payment_status: 'refunded', payment_id: 'mp-1' }),
     ['refunded']
   );
