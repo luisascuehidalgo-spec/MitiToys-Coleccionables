@@ -3,7 +3,7 @@ const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStock } = require('../lib/inventory');
 const { orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');
-const { findPaymentsByExternalReference, findPreferenceByExternalReference, PREFERENCE_TTL_MS } = require('../lib/payments');
+const { findPaymentsByExternalReference, findPreferenceByExternalReference, paymentsRequireReservation, PREFERENCE_TTL_MS } = require('../lib/payments');
 const { persistPreferenceIdentity } = require('../lib/external-identities');
 const {
   shippingEnabled, normalizePostalCode, normalizeProvinceCode, normalizeCart, cartHash,
@@ -117,7 +117,7 @@ async function runAutomation(sql) {
       console.warn('Mercado Pago uncertain checkout payment check failed:', 'code=' + String(error?.code || 'MP_PAYMENT_SEARCH_FAILED'), 'status=' + String(error?.providerStatus || 'unknown'));
       continue;
     }
-    if (payments.length) continue;
+    if (paymentsRequireReservation(payments)) continue;
 
     const claimed = await sql`
       UPDATE orders SET status='cancelled',payment_status='expired',payment_status_detail='preference_not_found',updated_at=NOW()
@@ -165,7 +165,7 @@ async function runAutomation(sql) {
       console.warn('Mercado Pago cleanup check failed:', 'code=' + String(error?.code || 'MP_PAYMENT_SEARCH_FAILED'), 'status=' + String(error?.providerStatus || 'unknown'));
       continue;
     }
-    if (payments.length) {
+    if (paymentsRequireReservation(payments)) {
       providerPaymentsFound += 1;
       continue;
     }
