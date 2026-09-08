@@ -11,6 +11,7 @@ test('panel destaca pagos con importe o moneda inválidos', () => {
   assert.match(admin, /amount_or_currency_mismatch/);
   assert.match(admin, /PAGO CON IMPORTE O MONEDA INVÁLIDOS/);
   assert.match(admin, /REVISAR EN MERCADO PAGO/);
+  assert.match(admin, /class=\"small bad\"/);
 });
 
 test('validation_failed no habilita generación de envío', () => {
