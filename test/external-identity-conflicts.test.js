@@ -163,5 +163,5 @@ test('Enviopack bloquea ownership conflict y evita un segundo despacho automáti
   assert.match(admin, /shipping_generation_status='conflict'/);
   assert.match(admin, /enviopack\.shipment_ownership_conflict/);
   assert.match(admin, /SHIPMENT_OWNERSHIP_CONFLICT/);
-  assert.match(admin, /if \(error\?\.code === 'SHIPMENT_OWNERSHIP_CONFLICT'\) throw error/);
+  assert.match(admin, /\['SHIPMENT_OWNERSHIP_CONFLICT','SHIPMENT_PROVIDER_MULTIPLE_MATCHES'\]\.includes\(error\?\.code\)/);
 });
