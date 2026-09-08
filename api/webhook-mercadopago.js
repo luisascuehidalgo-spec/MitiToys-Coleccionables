@@ -4,7 +4,7 @@ const { searchParams } = require('../lib/request-url');
 const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { orderStatusFromPayment, isLateApprovalConflict } = require('../lib/order-state');
 const { getPayment } = require('../lib/payments');
-const { paymentIdentityDecision } = require('../lib/payment-reconciliation');
+const { paymentIdentityDecision, isPartialRefund } = require('../lib/payment-reconciliation');
 const { queueAndSendOrderNotification } = require('../lib/notifications');
 
 function parseSignatureHeader(value) {
@@ -225,6 +225,63 @@ module.exports = async (req, res) => {
 
         const oldStatus = order.status;
         const preservePaymentConflict = order.payment_status_detail === 'multiple_approved_conflict';
+        const partialRefund = isPartialRefund(payment);
+
+        if (partialRefund) {
+          const terminalApprovalConflict = isLateApprovalConflict(oldStatus, payment.status);
+          const partialRefundDetail = preservePaymentConflict
+            ? 'multiple_approved_conflict'
+            : (terminalApprovalConflict ? 'late_approval_conflict' : 'partially_refunded');
+          const refundedAmount = Number(payment.transaction_amount_refunded || 0);
+          const refundedAmountKey = String(refundedAmount);
+          const partialRows = await sql`
+            UPDATE orders SET
+              payment_id=${paymentId},payment_status='approved',
+              payment_status_detail=${partialRefundDetail},status=${oldStatus},updated_at=NOW()
+            WHERE id=${order.id}
+              AND (
+                payment_id IS DISTINCT FROM ${paymentId}
+                OR payment_status IS DISTINCT FROM 'approved'
+                OR payment_status_detail IS DISTINCT FROM ${partialRefundDetail}
+              )
+            RETURNING id
+          `;
+          const partialEvents = await sql`
+            INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
+            SELECT
+              ${order.id},'payment.partial_refund_detected',${oldStatus},${oldStatus},
+              ${JSON.stringify({
+                payment_id: paymentId,
+                provider_status: payment.status || null,
+                provider_status_detail: payment.status_detail || null,
+                transaction_amount: payment.transaction_amount,
+                refunded_amount: refundedAmount,
+                currency_id: payment.currency_id || null,
+                reason: 'partial_refund_requires_review'
+              })}::jsonb
+            WHERE NOT EXISTS (
+              SELECT 1 FROM order_events
+              WHERE order_id=${order.id}
+                AND event_type='payment.partial_refund_detected'
+                AND payload->>'payment_id'=${paymentId}
+                AND COALESCE(payload->>'refunded_amount','0')=${refundedAmountKey}
+            )
+            RETURNING id
+          `;
+          console.warn(
+            'Mercado Pago partial refund requires review:',
+            'code=PARTIAL_REFUND_REQUIRES_REVIEW',
+            'order_id=' + String(order.id)
+          );
+          return res.status(200).json({
+            received: true,
+            payment_id: payment.id,
+            status: payment.status,
+            partial_refund: true,
+            duplicate: partialRows.length === 0 && partialEvents.length === 0
+          });
+        }
+
         const approvedMismatch = payment.status === 'approved' && !paymentMatchesOrder(payment, order);
 
         if (approvedMismatch) {
