@@ -57,29 +57,21 @@ jobs:
           new = old + "const { persistPreferenceIdentity } = require('../lib/external-identities');\n"
           if old not in s: raise SystemExit('envios import target missing')
           s = s.replace(old, new, 1)
-          old = """      const recovered = await sql`
-                UPDATE orders SET preference_id=${preference.id},payment_url=${preference.init_point},payment_status_detail=NULL,updated_at=NOW()
-                WHERE id=${order.id} AND status='pending' AND payment_id IS NULL AND payment_url IS NULL
-                RETURNING id
-              `;
-              if (recovered.length) {
-                await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_recovered','pending',${JSON.stringify({ preference_id: preference.id })}::jsonb)`;
-                preferencesRecovered += 1;
-              }
+          start = s.index("    if (preference) {")
+          end = s.index("\n    if (ageMs < 2 * 60 * 60 * 1000) continue;", start)
+          replacement = """    if (preference) {
+            const recovered = await persistPreferenceIdentity(sql, { orderId: order.id, preferenceId: preference.id, paymentUrl: preference.init_point });
+            if (!recovered.ok) {
+              const marked = await sql`UPDATE orders SET payment_status_detail='preference_ownership_conflict',updated_at=NOW() WHERE id=${order.id} AND payment_status_detail IS DISTINCT FROM 'preference_ownership_conflict' RETURNING id`;
+              if (marked.length) await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_ownership_conflict','pending',${JSON.stringify({ preference_id: preference.id, conflict_order_id: recovered.conflictOrderId || null })}::jsonb)`;
               continue;
+            }
+            await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_recovered','pending',${JSON.stringify({ preference_id: preference.id })}::jsonb)`;
+            preferencesRecovered += 1;
+            continue;
+          }
           """
-          new = """      const recovered = await persistPreferenceIdentity(sql, { orderId: order.id, preferenceId: preference.id, paymentUrl: preference.init_point });
-              if (!recovered.ok) {
-                const marked = await sql`UPDATE orders SET payment_status_detail='preference_ownership_conflict',updated_at=NOW() WHERE id=${order.id} AND payment_status_detail IS DISTINCT FROM 'preference_ownership_conflict' RETURNING id`;
-                if (marked.length) await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_ownership_conflict','pending',${JSON.stringify({ preference_id: preference.id, conflict_order_id: recovered.conflictOrderId || null })}::jsonb)`;
-                continue;
-              }
-              await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_recovered','pending',${JSON.stringify({ preference_id: preference.id })}::jsonb)`;
-              preferencesRecovered += 1;
-              continue;
-          """
-          if old not in s: raise SystemExit('envios preference recovery target missing')
-          s = s.replace(old, new, 1)
+          s = s[:start] + replacement + s[end:]
           envios.write_text(s)
 
           admin = Path('api/admin.js')
@@ -88,33 +80,29 @@ jobs:
           new = old + "const { isUniqueViolation, shipmentOwner } = require('../lib/external-identities');\n"
           if old not in s: raise SystemExit('admin import target missing')
           s = s.replace(old, new, 1)
-          old = """    const shipmentId = String(shipment.id);
-              const providerShipmentState = String(shipment.estado || '');
-          """
+          old = "    const shipmentId = String(shipment.id);\n    const providerShipmentState = String(shipment.estado || '');\n"
           new = """    const shipmentId = String(shipment.id);
-              const existingShipmentOwner = await shipmentOwner(sql, shipmentId, id);
-              if (existingShipmentOwner) {
-                await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('Envíopack devolvió un shipment_id que ya pertenece a otro pedido. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
-                await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_ownership_conflict',${order.status},${JSON.stringify({ shipment_id: shipmentId, conflict_order_id: existingShipmentOwner })}::jsonb)`;
-                throw Object.assign(new Error('Envíopack devolvió un identificador de envío ya asociado a otro pedido. No vuelvas a generar el envío hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
-              }
-              const providerShipmentState = String(shipment.estado || '');
+          const existingShipmentOwner = await shipmentOwner(sql, shipmentId, id);
+          if (existingShipmentOwner) {
+            await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('Envíopack devolvió un shipment_id que ya pertenece a otro pedido. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
+            await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_ownership_conflict',${order.status},${JSON.stringify({ shipment_id: shipmentId, conflict_order_id: existingShipmentOwner })}::jsonb)`;
+            throw Object.assign(new Error('Envíopack devolvió un identificador de envío ya asociado a otro pedido. No vuelvas a generar el envío hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
+          }
+          const providerShipmentState = String(shipment.estado || '');
           """
           if old not in s: raise SystemExit('admin shipment id target missing')
           s = s.replace(old, new, 1)
-          old = """  } catch (error) {
-              if (providerShipment?.id) {
-          """
+          old = "  } catch (error) {\n    if (providerShipment?.id) {\n"
           new = """  } catch (error) {
-              if (error?.code === 'SHIPMENT_OWNERSHIP_CONFLICT') throw error;
-              if (isUniqueViolation(error) && providerShipment?.id) {
-                const conflictingShipmentId = String(providerShipment.id);
-                const conflictOwner = await shipmentOwner(sql, conflictingShipmentId, id);
-                await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('Conflicto de ownership del shipment_id detectado por PostgreSQL. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
-                await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_ownership_conflict',${order.status},${JSON.stringify({ shipment_id: conflictingShipmentId, conflict_order_id: conflictOwner || null, source: 'unique_constraint' })}::jsonb)`;
-                throw Object.assign(new Error('El identificador de envío ya está asociado a otro pedido. No vuelvas a generar el envío hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
-              }
-              if (providerShipment?.id) {
+          if (error?.code === 'SHIPMENT_OWNERSHIP_CONFLICT') throw error;
+          if (isUniqueViolation(error) && providerShipment?.id) {
+            const conflictingShipmentId = String(providerShipment.id);
+            const conflictOwner = await shipmentOwner(sql, conflictingShipmentId, id);
+            await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('Conflicto de ownership del shipment_id detectado por PostgreSQL. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
+            await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_ownership_conflict',${order.status},${JSON.stringify({ shipment_id: conflictingShipmentId, conflict_order_id: conflictOwner || null, source: 'unique_constraint' })}::jsonb)`;
+            throw Object.assign(new Error('El identificador de envío ya está asociado a otro pedido. No vuelvas a generar el envío hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
+          }
+          if (providerShipment?.id) {
           """
           if old not in s: raise SystemExit('admin catch target missing')
           s = s.replace(old, new, 1)
