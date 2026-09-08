@@ -1,0 +1,51 @@
+name: Apply late payment admin guard
+on:
+  push:
+    branches: [fix/late-payment-approval-conflict-20260908]
+    paths: [.github/workflows/apply-late-payment-admin-guard-temp.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/late-payment-approval-conflict-20260908
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply exact admin UI guards
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('admin.html')
+          s=p.read_text()
+          old="const ORDER_STATUS_ORDER=['pending','approved','processing','shipped','delivered','cancelled','refunded'];function orderStatusOptions(o){const current=String(o.status||'pending'),payment=String(o.payment_status||'pending'),set=new Set([current]);if(payment==='approved'){['approved','processing','shipped','delivered'].forEach(x=>set.add(x))}else if(['refunded','charged_back'].includes(payment)){set.add('refunded')}else if(['cancelled','rejected'].includes(payment)){set.add('cancelled')}else{set.add('pending');if(!o.payment_id)set.add('cancelled')}return ORDER_STATUS_ORDER.filter(x=>set.has(x)).concat([...set].filter(x=>!ORDER_STATUS_ORDER.includes(x)))}"
+          new="const ORDER_STATUS_ORDER=['pending','approved','processing','shipped','delivered','cancelled','refunded'];function orderStatusOptions(o){const current=String(o.status||'pending'),payment=String(o.payment_status||'pending'),set=new Set([current]);if(current==='refunded')return[current];if(current==='cancelled'){if(['refunded','charged_back'].includes(payment))set.add('refunded');return ORDER_STATUS_ORDER.filter(x=>set.has(x)).concat([...set].filter(x=>!ORDER_STATUS_ORDER.includes(x)))}if(payment==='approved'){['approved','processing','shipped','delivered'].forEach(x=>set.add(x))}else if(['refunded','charged_back'].includes(payment)){set.add('refunded')}else if(['cancelled','rejected'].includes(payment)){set.add('cancelled')}else{set.add('pending');if(!o.payment_id)set.add('cancelled')}return ORDER_STATUS_ORDER.filter(x=>set.has(x)).concat([...set].filter(x=>!ORDER_STATUS_ORDER.includes(x)))}"
+          if old not in s: raise SystemExit('orderStatusOptions target not found')
+          s=s.replace(old,new,1)
+          old2="<td>${esc(o.payment_status||'pending')}<br><span class=\"muted small\">${esc(o.payment_status_detail||'')}</span></td>"
+          new2="<td>${esc(o.payment_status||'pending')}<br><span class=\"muted small\">${esc(o.payment_status_detail||'')}</span>${o.payment_status_detail==='late_approval_conflict'?'<br><span class=\"small bad\">⚠ PAGO APROBADO DESPUÉS DEL CIERRE · REVISAR / REEMBOLSAR</span>':''}</td>"
+          if old2 not in s: raise SystemExit('payment cell target not found')
+          s=s.replace(old2,new2,1)
+          old3="${o.payment_status==='approved'&&!o.enviopack_shipment_id&&['not_created','failed'].includes(String(o.shipping_generation_status||'not_created'))?'<button class=\"create\" onclick=\"generateShipment('+o.id+',this)\">🚚 GENERAR ENVÍO</button>':''}"
+          new3="${o.payment_status==='approved'&&!['cancelled','refunded'].includes(String(o.status||''))&&!o.enviopack_shipment_id&&['not_created','failed'].includes(String(o.shipping_generation_status||'not_created'))?'<button class=\"create\" onclick=\"generateShipment('+o.id+',this)\">🚚 GENERAR ENVÍO</button>':''}"
+          if old3 not in s: raise SystemExit('generate shipment target not found')
+          s=s.replace(old3,new3,1)
+          p.write_text(s)
+          PY
+      - name: Validate syntax and full regression suite
+        run: |
+          node --check api/webhook-mercadopago.js
+          node --check lib/order-state.js
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/apply-late-payment-admin-guard-temp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add admin.html .github/workflows/apply-late-payment-admin-guard-temp.yml
+          git commit -m "Block late-approved terminal orders in admin"
+          git push origin HEAD:fix/late-payment-approval-conflict-20260908
