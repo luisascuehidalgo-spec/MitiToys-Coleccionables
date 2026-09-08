@@ -10,6 +10,7 @@ const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const webhook = read('api/webhook-mercadopago.js');
 const adminApi = read('api/admin.js');
+const adminUi = read('admin.html');
 
 test('detecta reembolso parcial sin confundirlo con reembolso total', () => {
   assert.equal(isPartialRefund({ status: 'approved', status_detail: 'partially_refunded', transaction_amount: 100, transaction_amount_refunded: 0 }), true);
@@ -67,4 +68,11 @@ test('backend de Enviopack bloquea pagos que requieren revisión en todas las ba
   assert.match(adminApi, /requiresPaymentReview\(firstPaymentGuard\[0\]\)/);
   assert.match(adminApi, /requiresPaymentReview\(secondPaymentGuard\[0\]\)/);
   assert.match(adminApi, /requiresPaymentReview\(finalPaymentGuard\[0\]\)/);
+});
+
+test('panel muestra la alerta de reembolso parcial y oculta nuevo fulfillment', () => {
+  assert.match(adminUi, /REEMBOLSO PARCIAL · REVISAR EN MERCADO PAGO ANTES DE CONTINUAR/);
+  assert.match(adminUi, /\['multiple_approved_conflict','partially_refunded'\]\.includes\(o\.payment_status_detail\)\)return\[current\]/);
+  assert.match(adminUi, /o\.payment_status==='approved'&&!\['multiple_approved_conflict','partially_refunded'\]\.includes\(o\.payment_status_detail\)/);
+  assert.match(adminUi, /'\"':'&quot;'/);
 });
