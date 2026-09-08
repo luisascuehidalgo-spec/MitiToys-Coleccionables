@@ -7,6 +7,7 @@ const {
   PUBLIC_BASE_URL,
   PREFERENCE_TTL_MS,
   OFFLINE_PAYMENT_TTL_MS,
+  paymentsRequireReservation,
   preferenceWindow,
   findPaymentsByExternalReference,
   expirePreference
@@ -109,13 +110,18 @@ test('liberación de inventario solo suma stock cuando se inserta el primer rele
   assert.deepEqual(await releaseReservedStock(sql, 55, 'test'), []);
 });
 
-test('cron solo vence pedidos sin payment_id y verifica Mercado Pago antes de liberar', () => {
+test('cron solo vence pedidos sin payment_id y clasifica Mercado Pago antes de liberar', () => {
   const envios = read('api/envios.js');
   assert.match(envios, /payment_id IS NULL/);
   assert.match(envios, /INTERVAL '26 hours'/);
   assert.match(envios, /await findPaymentsByExternalReference\(order\.external_reference\)/);
-  assert.match(envios, /if \(payments\.length\)/);
+  assert.match(envios, /paymentsRequireReservation\(payments\)/);
+  assert.doesNotMatch(envios, /if \(payments\.length\)/);
   assert.match(envios, /await releaseReservedStock\(sql, order\.id, 'Liberación por checkout vencido'\)/);
+
+  assert.equal(paymentsRequireReservation([{ status: 'rejected' }, { status: 'cancelled' }]), false);
+  assert.equal(paymentsRequireReservation([{ status: 'rejected' }, { status: 'pending' }]), true);
+  assert.equal(paymentsRequireReservation([{ status: 'approved' }]), true);
 
   const vercel = JSON.parse(read('vercel.json'));
   assert.equal(vercel.crons[0].schedule, '0 * * * *');
