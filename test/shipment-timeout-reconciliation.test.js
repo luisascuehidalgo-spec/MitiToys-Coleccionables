@@ -138,6 +138,11 @@ test('admin bloquea el reintento automático ante resultado incierto y ofrece re
   assert.match(admin, /SHIPMENT_CREATION_UNCERTAIN/);
   assert.match(admin, /action==='reconcile_shipment'/);
   assert.match(admin, /async function reconcileShipmentCreation/);
+  assert.match(admin, /return reconcileShipmentCreation\(sql, id\)/);
+  assert.match(admin, /WHERE id=\$\{id\} AND enviopack_shipment_id IS NULL/);
+  assert.match(admin, /shipping_created_at=COALESCE\(shipping_created_at,NOW\(\)\)/);
+  assert.match(admin, /SHIPMENT_RECONCILIATION_RACE/);
+  assert.match(admin, /source: 'reconciliation_unique_race'/);
   assert.match(ui, /\['not_created','failed'\]\.includes\(String\(o\.shipping_generation_status\|\|'not_created'\)\)/);
   assert.match(ui, /reconcile_shipment/);
   assert.match(ui, /VERIFICAR EN ENVÍOPACK/);
