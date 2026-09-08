@@ -3,7 +3,7 @@ const { verify } = require('./admin-auth');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { expirePreference } = require('../lib/payments');
-const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');
+const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider, hasPaymentConflict } = require('../lib/order-state');
 const { shipmentOwner, shipmentConflictOwner } = require('../lib/external-identities');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
@@ -64,14 +64,16 @@ async function createShipment(sql, id) {
   if (!order) throw Object.assign(new Error('Pedido no encontrado.'), { status: 404 });
   if (order.enviopack_shipment_id) return { reused: true, order };
   if (order.payment_status !== 'approved') throw Object.assign(new Error('El envío solo puede generarse cuando Mercado Pago confirma el pago.'), { status: 409 });
+  if (hasPaymentConflict(order)) throw Object.assign(new Error('El pedido tiene un conflicto entre pagos aprobados. Revisalo en Mercado Pago antes de generar el envío.'), { status: 409, code: 'PAYMENT_CONFLICT_REQUIRES_REVIEW' });
   if (!order.shipping_quote_id || order.shipping_provider !== 'enviopack') throw Object.assign(new Error('Este pedido no tiene una cotización de Envíopack asociada.'), { status: 409 });
 
   const claim = await sql`
     UPDATE orders SET shipping_generation_status='processing',shipping_last_error=NULL,updated_at=NOW()
-    WHERE id=${id} AND payment_status='approved' AND status NOT IN ('cancelled','refunded') AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')
+    WHERE id=${id} AND payment_status='approved' AND COALESCE(payment_status_detail,'')<>'multiple_approved_conflict'
+      AND status NOT IN ('cancelled','refunded') AND enviopack_shipment_id IS NULL AND shipping_generation_status IN ('not_created','failed')
     RETURNING id
   `;
-  if (!claim.length) throw Object.assign(new Error('El envío ya se está generando o el pago dejó de estar aprobado. Actualizá el panel antes de reintentar.'), { status: 409 });
+  if (!claim.length) throw Object.assign(new Error('El envío ya se está generando, el pago dejó de estar aprobado o requiere revisión. Actualizá el panel antes de reintentar.'), { status: 409 });
 
   try {
     const address = parseAddress(order);
@@ -91,8 +93,8 @@ async function createShipment(sql, id) {
 
     const items = await sql`SELECT product_id,product_title,quantity FROM order_items WHERE order_id=${id} ORDER BY id`;
     const packages = await packagesForOrder(sql, order);
-    const firstPaymentGuard = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
-    if (!firstPaymentGuard.length || firstPaymentGuard[0].payment_status !== 'approved' || ['cancelled','refunded'].includes(String(firstPaymentGuard[0].status || ''))) {
+    const firstPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail FROM orders WHERE id=${id} LIMIT 1`;
+    if (!firstPaymentGuard.length || firstPaymentGuard[0].payment_status !== 'approved' || hasPaymentConflict(firstPaymentGuard[0]) || ['cancelled','refunded'].includes(String(firstPaymentGuard[0].status || ''))) {
       throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de iniciar el despacho.'), { status: 409, code: 'PAYMENT_CHANGED_DURING_SHIPMENT' });
     }
     providerOrderId = order.enviopack_order_id || await getOrCreateEnviopackOrder({
@@ -101,8 +103,8 @@ async function createShipment(sql, id) {
       items
     });
     await sql`UPDATE orders SET enviopack_order_id=${providerOrderId},updated_at=NOW() WHERE id=${id}`;
-    const secondPaymentGuard = await sql`SELECT status,payment_status FROM orders WHERE id=${id} LIMIT 1`;
-    if (!secondPaymentGuard.length || secondPaymentGuard[0].payment_status !== 'approved' || ['cancelled','refunded'].includes(String(secondPaymentGuard[0].status || ''))) {
+    const secondPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail FROM orders WHERE id=${id} LIMIT 1`;
+    if (!secondPaymentGuard.length || secondPaymentGuard[0].payment_status !== 'approved' || hasPaymentConflict(secondPaymentGuard[0]) || ['cancelled','refunded'].includes(String(secondPaymentGuard[0].status || ''))) {
       throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de confirmar el despacho.'), { status: 409, code: 'PAYMENT_CHANGED_DURING_SHIPMENT' });
     }
 
@@ -120,6 +122,10 @@ async function createShipment(sql, id) {
       catch (detailsError) { console.warn('existing shipment details unavailable:', 'code=' + String(detailsError?.code || detailsError?.name || 'DETAILS_ERROR'), 'status=' + String(detailsError?.providerStatus || 'unknown')); }
       reusedProviderShipment = true;
     } else {
+      const finalPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail FROM orders WHERE id=${id} LIMIT 1`;
+      if (!finalPaymentGuard.length || finalPaymentGuard[0].payment_status !== 'approved' || hasPaymentConflict(finalPaymentGuard[0]) || ['cancelled','refunded'].includes(String(finalPaymentGuard[0].status || ''))) {
+        throw Object.assign(new Error('Mercado Pago cambió el estado del pago antes de crear el envío.'), { status: 409, code: 'PAYMENT_CHANGED_DURING_SHIPMENT' });
+      }
       shipment = await createConfirmedShipment({
         providerOrderId,
         order,
@@ -139,7 +145,7 @@ if (existingShipmentOwner) {
 const providerShipmentState = String(shipment.estado || '');
     const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;
     const labelReady = providerShipmentState.toUpperCase() === 'P';
-    const currentRows = await sql`SELECT status,payment_status,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
+    const currentRows = await sql`SELECT status,payment_status,payment_status_detail,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
     const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
     const finalOrderStatus = orderStatusFromShipping(currentOrder, 'processing');
     const finalShippingStatus = shippingStatusFromProvider(currentOrder.shipping_status, 'preparing');
@@ -154,10 +160,10 @@ const providerShipmentState = String(shipment.estado || '');
         shipping_generation_status='created',shipping_status=${finalShippingStatus},status=${finalOrderStatus},
         shipping_created_at=NOW(),shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
       WHERE id=${id}
-      RETURNING status,payment_status
+      RETURNING status,payment_status,payment_status_detail
     `;
     await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created',${finalOrderStatus},${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;
-    if (trackingNumber && updated[0]?.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
+    if (trackingNumber && updated[0]?.payment_status === 'approved' && !hasPaymentConflict(updated[0])) await queueAndSendOrderNotification(sql, id, 'shipment_created');
     return { reused: reusedProviderShipment, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady, order_status: finalOrderStatus };
   } catch (error) {
 if (['SHIPMENT_OWNERSHIP_CONFLICT','SHIPMENT_PROVIDER_MULTIPLE_MATCHES'].includes(error?.code)) throw error;
@@ -194,7 +200,7 @@ if (providerShipment?.id) {
       }
       const recoveredProviderState = String(providerShipment.estado || '');
       try {
-        const currentRows = await sql`SELECT status,payment_status,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
+        const currentRows = await sql`SELECT status,payment_status,payment_status_detail,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
         const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
         const recoveredOrderStatus = orderStatusFromShipping(currentOrder, 'processing');
         const recoveredShippingStatus = shippingStatusFromProvider(currentOrder.shipping_status, 'preparing');
@@ -262,7 +268,7 @@ async function reconcileShipmentCreation(sql, id) {
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking, 120) || null;
   const providerShipmentState = String(details?.estado || shipments[0]?.estado || '');
   const state = providerState(details, []);
-  const currentRows = await sql`SELECT status,payment_status,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
+  const currentRows = await sql`SELECT status,payment_status,payment_status_detail,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
   const currentOrder = currentRows[0] || order;
   state.order = orderStatusFromShipping(currentOrder, state.order);
   state.shipping = shippingStatusFromProvider(currentOrder.shipping_status, state.shipping);
@@ -277,8 +283,9 @@ async function reconcileShipmentCreation(sql, id) {
       WHERE id=${id} AND enviopack_shipment_id IS NULL
         AND shipping_generation_status IN ('uncertain','processing','failed','not_created')
         AND payment_status IS NOT DISTINCT FROM ${currentOrder.payment_status}
+        AND payment_status_detail IS NOT DISTINCT FROM ${currentOrder.payment_status_detail}
         AND status=${currentOrder.status}
-      RETURNING status,payment_status
+      RETURNING status,payment_status,payment_status_detail
     `;
   } catch (error) {
     const raceOwner = await shipmentConflictOwner(sql, error, shipmentId, id);
@@ -300,7 +307,7 @@ async function reconcileShipmentCreation(sql, id) {
   }
 
   await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.shipment_reconciled',${order.status},${state.order},${JSON.stringify({ provider_order_id: order.enviopack_order_id, shipment_id: shipmentId, provider_state: providerShipmentState })}::jsonb)`;
-  if (trackingNumber && updated[0]?.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
+  if (trackingNumber && updated[0]?.payment_status === 'approved' && !hasPaymentConflict(updated[0])) await queueAndSendOrderNotification(sql, id, 'shipment_created');
   return { found: true, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady, order_status: state.order };
 }
 
@@ -326,7 +333,7 @@ async function syncShipment(sql, id) {
     WHERE id=${id}
   `;
   await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${state.order},${JSON.stringify({ tracking_number: trackingNumber, tracking })}::jsonb)`;
-  if (trackingNumber && trackingNumber !== order.tracking_number && order.payment_status === 'approved') await queueAndSendOrderNotification(sql, id, 'shipment_created');
+  if (trackingNumber && trackingNumber !== order.tracking_number && order.payment_status === 'approved' && !hasPaymentConflict(order)) await queueAndSendOrderNotification(sql, id, 'shipment_created');
   if (state.order === 'delivered') {
     await ensureReviewInvites(sql, id);
     await queueAndSendOrderNotification(sql, id, 'review_invite');
@@ -400,10 +407,10 @@ module.exports = async (req,res)=>{
       const phone=req.body?.shipping_phone==null?null:clean(req.body.shipping_phone,50);
       const notes=req.body?.shipping_notes==null?null:clean(req.body.shipping_notes,1000);
       if(!Number.isInteger(id)||id<1||!VALID.has(status)) return res.status(400).json({error:'Datos de pedido inválidos.'});
-      const before=await sql`SELECT status,payment_id,payment_status,preference_id FROM orders WHERE id=${id}`;
+      const before=await sql`SELECT status,payment_id,payment_status,payment_status_detail,preference_id FROM orders WHERE id=${id}`;
       if(!before.length) return res.status(404).json({error:'Pedido no encontrado.'});
       const previous=before[0];
-      const transitionError=adminStatusError({currentStatus:previous.status,targetStatus:status,paymentId:previous.payment_id,paymentStatus:previous.payment_status});
+      const transitionError=adminStatusError({currentStatus:previous.status,targetStatus:status,paymentId:previous.payment_id,paymentStatus:previous.payment_status,paymentStatusDetail:previous.payment_status_detail});
       if(transitionError) return res.status(409).json({error:transitionError});
       if(previous.status!==status && status==='cancelled' && !previous.payment_id && previous.preference_id) {
         try { await expirePreference(previous.preference_id); }
