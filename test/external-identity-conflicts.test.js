@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { isUniqueViolation, persistPreferenceIdentity } = require('../lib/external-identities');
+const { isUniqueViolation, persistPreferenceIdentity, shipmentConflictOwner } = require('../lib/external-identities');
 
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -138,10 +138,28 @@ test('cron reconcilia preference_id sin saltarse la protección UNIQUE ni la car
   assert.doesNotMatch(envios, /UPDATE orders SET preference_id=\$\{preference\.id\}/);
 });
 
+test('23505 solo se clasifica como ownership conflict cuando el shipment pertenece a otro pedido', async () => {
+  let calls = 0;
+  const sqlNoOwner = async () => { calls += 1; return []; };
+  assert.equal(await shipmentConflictOwner(sqlNoOwner, { code: '40001' }, 'ship-1', 77), null);
+  assert.equal(calls, 0);
+  assert.equal(await shipmentConflictOwner(sqlNoOwner, { code: '23505' }, null, 77), null);
+  assert.equal(calls, 0);
+  assert.equal(await shipmentConflictOwner(sqlNoOwner, { code: '23505' }, 'ship-1', 77), null);
+  assert.equal(calls, 1);
+
+  const sqlOtherOwner = async (strings) => {
+    assert.match(strings.join('?'), /enviopack_shipment_id/);
+    return [{ id: 91 }];
+  };
+  assert.equal(await shipmentConflictOwner(sqlOtherOwner, { code: '23505' }, 'ship-1', 77), 91);
+});
+
 test('Enviopack bloquea ownership conflict y evita un segundo despacho automático', () => {
   const admin = read('api/admin.js');
   assert.match(admin, /shipmentOwner\(sql, shipmentId, id\)/);
-  assert.match(admin, /isUniqueViolation\(error\)/);
+  assert.match(admin, /shipmentConflictOwner\(sql, error, recoveredShipmentId, id\)/);
+  assert.match(admin, /if \(conflictOwner\)/);
   assert.match(admin, /shipping_generation_status='conflict'/);
   assert.match(admin, /enviopack\.shipment_ownership_conflict/);
   assert.match(admin, /SHIPMENT_OWNERSHIP_CONFLICT/);
