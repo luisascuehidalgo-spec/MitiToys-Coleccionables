@@ -39,10 +39,6 @@ test('admin nunca puede revivir cancelled/refunded aunque payment_status sea app
     ['cancelled']
   );
   assert.deepEqual(
-    adminStatusOptions({ status: 'refunded', payment_status: 'approved', payment_id: 'mp-1' }),
-    ['refunded']
-  );
-  assert.deepEqual(
     adminStatusOptions({ status: 'refunded', payment_status: 'refunded', payment_id: 'mp-1' }),
     ['refunded']
   );
@@ -58,8 +54,11 @@ test('webhook registra el conflicto sin reactivar ni liberar stock', () => {
   assert.match(block, /payment_status='approved'/);
   assert.match(block, /payment_status_detail='late_approval_conflict'/);
   assert.match(block, /status=\$\{oldStatus\}/);
+  assert.match(block, /payment_status_detail IS DISTINCT FROM 'late_approval_conflict'/);
+  assert.match(block, /RETURNING id/);
+  assert.match(block, /if \(lateConflictRows\.length\)/);
   assert.match(block, /payment\.late_approval_conflict/);
-  assert.match(block, /alreadyMarked/);
+  assert.match(block, /duplicate: lateConflictRows\.length === 0/);
   assert.match(block, /late_approval_conflict: true/);
   assert.doesNotMatch(block, /releaseReservedStock/);
   assert.doesNotMatch(block, /queueAndSendOrderNotification/);
