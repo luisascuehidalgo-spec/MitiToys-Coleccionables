@@ -12,7 +12,7 @@ const context = {
     tracking_number: 'ABC123'
   },
   items: [{ product_id: '3377', product_title: 'Luffy Gear 5', quantity: 1 }],
-  reviews: []
+  reviews: [{ product_id: '3377', review_token: 'review-token-1001' }]
 };
 
 test('validEmail normaliza direcciones validas y descarta valores incorrectos', () => {
