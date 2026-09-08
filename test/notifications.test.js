@@ -74,6 +74,16 @@ test('pagos en revisión, reembolsos y estados obsoletos bloquean emails incompa
     payment_status: 'approved',
     payment_status_detail: 'late_approval_conflict'
   }), false);
+  assert.equal(notificationAllowed('payment_approved', {
+    status: 'processing',
+    payment_status: 'approved',
+    payment_status_detail: null
+  }), false);
+  assert.equal(notificationAllowed('order_cancelled', {
+    status: 'cancelled',
+    payment_status: 'refunded',
+    payment_status_detail: null
+  }), false);
   assert.equal(notificationAllowed('shipment_created', {
     status: 'delivered',
     payment_status: 'approved',
