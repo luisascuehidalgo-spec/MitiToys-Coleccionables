@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { queueAndSendOrderNotification, queueOrderNotification } = require('../lib/notifications');
+const { ensureReviewInvites, queueAndSendOrderNotification, queueOrderNotification } = require('../lib/notifications');
 
 function withEmailEnv(t) {
   const oldKey = process.env.RESEND_API_KEY;
@@ -158,4 +158,34 @@ test('review_invite no se encola si el pedido entregado fue reembolsado', async 
   const result = await queueOrderNotification(sql, 99, 'review_invite');
   assert.equal(result, null);
   assert.equal(insertCalls, 0);
+});
+
+test('ensureReviewInvites no crea tokens si el pedido entregado ya no es financieramente elegible', async () => {
+  let itemReads = 0;
+  let reviewWrites = 0;
+  const sql = async (strings) => {
+    const text = strings.join('?');
+    if (text.includes('SELECT customer_id,status,payment_status,payment_status_detail')) {
+      return [{
+        customer_id: 5,
+        status: 'delivered',
+        payment_status: 'refunded',
+        payment_status_detail: null
+      }];
+    }
+    if (text.includes('SELECT DISTINCT product_id')) {
+      itemReads += 1;
+      return [{ product_id: '3377' }];
+    }
+    if (text.includes('INSERT INTO reviews')) {
+      reviewWrites += 1;
+      return [];
+    }
+    throw new Error('SQL inesperado: ' + text);
+  };
+
+  const created = await ensureReviewInvites(sql, 100);
+  assert.deepEqual(created, []);
+  assert.equal(itemReads, 0);
+  assert.equal(reviewWrites, 0);
 });
