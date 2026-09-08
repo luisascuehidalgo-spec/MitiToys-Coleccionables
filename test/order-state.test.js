@@ -151,7 +151,8 @@ test('webhook usa máquina de estados y valida importe/moneda antes de aprobar',
   assert.match(webhook, /payment\.validation_failed/);
   assert.match(webhook, /total_amount,currency/);
   assert.match(webhook, /payment_status='validation_failed'/);
-  assert.match(webhook, /payment_status_detail='amount_or_currency_mismatch'/);
+  assert.match(webhook, /const validationDetail = preservePaymentConflict \? 'multiple_approved_conflict' : 'amount_or_currency_mismatch'/);
+  assert.match(webhook, /payment_status_detail=\$\{validationDetail\}/);
   assert.match(webhook, /provider_status: payment\.status/);
   assert.match(webhook, /releaseReservedStockIfUnshipped/);
 });
