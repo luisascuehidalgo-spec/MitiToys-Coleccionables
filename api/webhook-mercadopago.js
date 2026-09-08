@@ -3,6 +3,7 @@ const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { orderStatusFromPayment, isLateApprovalConflict } = require('../lib/order-state');
+const { getPayment } = require('../lib/payments');
 const { queueAndSendOrderNotification } = require('../lib/notifications');
 
 function parseSignatureHeader(value) {
@@ -55,15 +56,18 @@ module.exports = async (req, res) => {
     if (!isValidSignature(req, dataId)) return res.status(401).json({ error: 'Firma de Webhook inválida o clave no configurada.' });
     if (body?.live_mode === false) return res.status(200).json({ received: true, simulated: true });
 
-    const token = process.env.MERCADOPAGO_ACCESS_TOKEN;
-    if (!token) return res.status(500).json({ error: 'Falta configurar MERCADOPAGO_ACCESS_TOKEN.' });
-
-    const paymentResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(dataId)}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const payment = await paymentResponse.json().catch(() => ({}));
-    if (!paymentResponse.ok) {
-      console.error('Error consultando pago en Mercado Pago:', 'status=' + String(paymentResponse.status));
+    let payment;
+    try {
+      payment = await getPayment(dataId);
+    } catch (error) {
+      if (error?.code === 'MP_NOT_CONFIGURED') {
+        return res.status(500).json({ error: 'Falta configurar MERCADOPAGO_ACCESS_TOKEN.' });
+      }
+      console.error(
+        'Error consultando pago en Mercado Pago:',
+        'code=' + String(error?.code || 'MP_PAYMENT_LOOKUP_FAILED'),
+        'status=' + String(error?.providerStatus || 'unknown')
+      );
       return res.status(502).json({ error: 'No se pudo consultar el pago.' });
     }
 
