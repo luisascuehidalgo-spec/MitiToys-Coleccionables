@@ -177,7 +177,7 @@ test('admin backend y UI comparten reglas respaldadas por Mercado Pago', () => {
 
 test('generación de envío revalida el pago y protege carreras con Enviopack', () => {
   const adminApi = read('api/admin.js');
-  assert.match(adminApi, /payment_status='approved' AND COALESCE\(payment_status_detail,''\)<>'multiple_approved_conflict'[\s\S]*status NOT IN \('cancelled','refunded'\) AND enviopack_shipment_id IS NULL/);
+  assert.match(adminApi, /payment_status='approved'[\s\S]*COALESCE\(payment_status_detail,''\) NOT IN \('multiple_approved_conflict','partially_refunded'\)[\s\S]*status NOT IN \('cancelled','refunded'\) AND enviopack_shipment_id IS NULL/);
   assert.match(adminApi, /firstPaymentGuard/);
   assert.match(adminApi, /secondPaymentGuard/);
   assert.match(adminApi, /PAYMENT_CHANGED_DURING_SHIPMENT/);
