@@ -89,15 +89,22 @@ module.exports = async (req, res) => {
         `;
 
         if (ownership.length) {
+          const conflictingOrderId = String(ownership[0].id);
           await sql`
             INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
-            VALUES(
+            SELECT
               ${order.id},'payment.ownership_conflict',${order.status},${order.status},
               ${JSON.stringify({
                 payment_id: paymentId,
                 conflicting_order_id: ownership[0].id,
                 external_reference: payment.external_reference
               })}::jsonb
+            WHERE NOT EXISTS (
+              SELECT 1 FROM order_events
+              WHERE order_id=${order.id}
+                AND event_type='payment.ownership_conflict'
+                AND payload->>'payment_id'=${paymentId}
+                AND payload->>'conflicting_order_id'=${conflictingOrderId}
             )
           `;
           console.error(
@@ -128,52 +135,68 @@ module.exports = async (req, res) => {
           customerId = customers[0].id;
         }
 
+        if (customerId && String(order.customer_id || '') !== String(customerId)) {
+          await sql`
+            UPDATE orders SET customer_id=${customerId},updated_at=NOW()
+            WHERE id=${order.id} AND customer_id IS DISTINCT FROM ${customerId}
+          `;
+        }
+
         const oldStatus = order.status;
         const approvedMismatch = payment.status === 'approved' && !paymentMatchesOrder(payment, order);
 
         if (approvedMismatch) {
-          await sql`
+          const validationRows = await sql`
             UPDATE orders SET
-              customer_id=${customerId},
               payment_id=${paymentId},
               payment_status='validation_failed',
               payment_status_detail='amount_or_currency_mismatch',
               updated_at=NOW()
             WHERE id=${order.id}
+              AND (
+                payment_id IS DISTINCT FROM ${paymentId}
+                OR payment_status IS DISTINCT FROM 'validation_failed'
+                OR payment_status_detail IS DISTINCT FROM 'amount_or_currency_mismatch'
+              )
+            RETURNING id
           `;
-          await sql`
-            INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
-            VALUES(
-              ${order.id},'payment.validation_failed',${oldStatus},${oldStatus},
-              ${JSON.stringify({
-                payment_id: paymentId,
-                provider_status: payment.status,
-                provider_status_detail: payment.status_detail || null,
-                transaction_amount: payment.transaction_amount,
-                currency_id: payment.currency_id || null,
-                expected_amount: Number(order.total_amount),
-                expected_currency: order.currency || 'ARS',
-                reason: 'amount_or_currency_mismatch'
-              })}::jsonb
-            )
-          `;
-          console.error('Mercado Pago payment validation failed:', 'order_id=' + String(order.id));
-          return res.status(200).json({ received: true, payment_id: payment.id, status: payment.status, validation_failed: true });
+          if (validationRows.length) {
+            await sql`
+              INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
+              VALUES(
+                ${order.id},'payment.validation_failed',${oldStatus},${oldStatus},
+                ${JSON.stringify({
+                  payment_id: paymentId,
+                  provider_status: payment.status,
+                  provider_status_detail: payment.status_detail || null,
+                  transaction_amount: payment.transaction_amount,
+                  currency_id: payment.currency_id || null,
+                  expected_amount: Number(order.total_amount),
+                  expected_currency: order.currency || 'ARS',
+                  reason: 'amount_or_currency_mismatch'
+                })}::jsonb
+              )
+            `;
+            console.error('Mercado Pago payment validation failed:', 'order_id=' + String(order.id));
+          }
+          return res.status(200).json({ received: true, payment_id: payment.id, status: payment.status, validation_failed: true, duplicate: validationRows.length === 0 });
         }
 
         if (isLateApprovalConflict(oldStatus, payment.status)) {
-          const alreadyMarked = order.payment_status === 'approved'
-            && order.payment_status_detail === 'late_approval_conflict'
-            && String(order.payment_id || '') === paymentId;
-
-          await sql`
+          const lateConflictRows = await sql`
             UPDATE orders SET
-              customer_id=${customerId},payment_id=${paymentId},payment_status='approved',
+              payment_id=${paymentId},payment_status='approved',
               payment_status_detail='late_approval_conflict',status=${oldStatus},updated_at=NOW()
             WHERE id=${order.id}
+              AND (
+                payment_id IS DISTINCT FROM ${paymentId}
+                OR payment_status IS DISTINCT FROM 'approved'
+                OR payment_status_detail IS DISTINCT FROM 'late_approval_conflict'
+              )
+            RETURNING id
           `;
 
-          if (!alreadyMarked) {
+          if (lateConflictRows.length) {
             await sql`
               INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
               VALUES(
@@ -199,18 +222,32 @@ module.exports = async (req, res) => {
             received: true,
             payment_id: payment.id,
             status: payment.status,
-            late_approval_conflict: true
+            late_approval_conflict: true,
+            duplicate: lateConflictRows.length === 0
           });
         }
 
         const newStatus = orderStatusFromPayment(oldStatus, payment.status);
-        await sql`
+        const providerPaymentStatus = payment.status || null;
+        const providerPaymentStatusDetail = payment.status_detail || null;
+        const paymentUpdateRows = await sql`
           UPDATE orders SET
-            customer_id=${customerId},payment_id=${paymentId},
-            payment_status=${payment.status || null},payment_status_detail=${payment.status_detail || null},
+            payment_id=${paymentId},
+            payment_status=${providerPaymentStatus},payment_status_detail=${providerPaymentStatusDetail},
             status=${newStatus},updated_at=NOW()
           WHERE id=${order.id}
+            AND (
+              payment_id IS DISTINCT FROM ${paymentId}
+              OR payment_status IS DISTINCT FROM ${providerPaymentStatus}
+              OR payment_status_detail IS DISTINCT FROM ${providerPaymentStatusDetail}
+              OR status IS DISTINCT FROM ${newStatus}
+            )
+          RETURNING id
         `;
+
+        if (!paymentUpdateRows.length) {
+          return res.status(200).json({ received: true, payment_id: payment.id, status: payment.status, duplicate: true });
+        }
 
         let stockRelease = null;
         if (newStatus === 'cancelled' || newStatus === 'refunded') {
