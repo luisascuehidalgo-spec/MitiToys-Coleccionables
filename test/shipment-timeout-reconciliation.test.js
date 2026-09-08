@@ -130,6 +130,7 @@ test('admin bloquea el reintento automático ante resultado incierto y ofrece re
   const admin = read('api/admin.js');
   const ui = read('admin.html');
   const shipping = read('lib/shipping.js');
+  const shippingSync = read('lib/shipping-sync.js');
 
   assert.match(shipping, /uncertainOnTransportError:\s*true/);
   assert.match(shipping, /async function listEnviopackOrderShipments/);
@@ -140,14 +141,19 @@ test('admin bloquea el reintento automático ante resultado incierto y ofrece re
   assert.match(admin, /async function reconcileShipmentCreation/);
   assert.match(admin, /return reconcileShipmentCreation\(sql, id\)/);
   assert.match(admin, /WHERE id=\$\{id\} AND enviopack_shipment_id IS NULL/);
-  assert.match(admin, /shipping_created_at=COALESCE\(shipping_created_at,NOW\(\)\)/);
+  assert.match(shippingSync, /shipping_created_at=COALESCE\(shipping_created_at,NOW\(\)\)/);
   assert.match(admin, /shipment = providerShipmentsBefore\[0\]/);
   assert.match(admin, /let details = shipments\[0\]/);
-  assert.match(admin, /payment_status IS NOT DISTINCT FROM \$\{currentOrder\.payment_status\}/);
-  assert.match(admin, /AND status=\$\{currentOrder\.status\}/);
+  assert.match(admin, /persistCreatedShipment\(sql/);
+  assert.match(admin, /proposedOrderStatus:\s*state\.order/);
+  assert.match(admin, /proposedShippingStatus:\s*state\.shipping/);
+  assert.match(shippingSync, /payment_status IS NOT DISTINCT FROM \$\{snapshot\.payment_status\}/);
+  assert.match(shippingSync, /payment_status_detail IS NOT DISTINCT FROM \$\{snapshot\.payment_status_detail\}/);
+  assert.match(shippingSync, /shipping_status IS NOT DISTINCT FROM \$\{snapshot\.shipping_status\}/);
+  assert.match(shippingSync, /shipping_generation_status IS NOT DISTINCT FROM \$\{snapshot\.shipping_generation_status\}/);
   assert.match(admin, /SHIPMENT_RECONCILIATION_RACE/);
   assert.match(admin, /source: 'reconciliation_unique_race'/);
-  assert.match(admin, /if \(!updated\.length\)[\s\S]{0,700}reused: true/);
+  assert.match(admin, /if \(!persisted\.reused\)/);
   assert.match(ui, /\['not_created','failed'\]\.includes\(String\(o\.shipping_generation_status\|\|'not_created'\)\)/);
   assert.match(ui, /reconcile_shipment/);
   assert.match(ui, /VERIFICAR EN ENVÍOPACK/);
