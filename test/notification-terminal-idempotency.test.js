@@ -23,6 +23,9 @@ test('una notificación ya enviada nunca vuelve a llamar a Resend', async t => {
       return [{
         id: 77,
         order_number: 'MT-77',
+        status: 'delivered',
+        payment_status: 'approved',
+        payment_status_detail: null,
         customer_name: 'Cliente Test',
         customer_email: 'cliente@example.com'
       }];
@@ -54,12 +57,13 @@ test('una notificación ya enviada nunca vuelve a llamar a Resend', async t => {
   assert.equal(fetchCalls, 0);
 });
 
-test('sent, sending, delivery_uncertain y failed son terminales para reenvío automático', () => {
+test('sent, sending, delivery_uncertain, failed y superseded son terminales para reenvío automático', () => {
   const notifications = read('lib/notifications.js');
-  assert.match(notifications, /AUTO_TERMINAL_NOTIFICATION_STATUSES = new Set\(\['sent', 'sending', 'delivery_uncertain', 'failed'\]\)/);
+  assert.match(notifications, /AUTO_TERMINAL_NOTIFICATION_STATUSES = new Set\(\['sent', 'sending', 'delivery_uncertain', 'failed', 'superseded'\]\)/);
   assert.match(notifications, /AUTO_TERMINAL_NOTIFICATION_STATUSES\.has\(status\)/);
   assert.match(notifications, /reason: 'already_sent'/);
   assert.match(notifications, /reason: 'in_flight'/);
+  assert.match(notifications, /status='superseded'/);
   assert.match(notifications, /WHERE status IN \('pending','pending_configuration'\)/);
   assert.doesNotMatch(notifications, /WHERE status IN \('pending','pending_configuration','failed'\)/);
 });
