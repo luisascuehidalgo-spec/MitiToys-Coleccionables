@@ -157,11 +157,14 @@ test('23505 solo se clasifica como ownership conflict cuando el shipment pertene
 
 test('Enviopack bloquea ownership conflict y evita un segundo despacho automático', () => {
   const admin = read('api/admin.js');
+  const syncGuard = read('lib/shipping-sync.js');
   assert.match(admin, /shipmentOwner\(sql, shipmentId, id\)/);
   assert.match(admin, /shipmentConflictOwner\(sql, error, recoveredShipmentId, id\)/);
   assert.match(admin, /if \(conflictOwner\)/);
   assert.match(admin, /shipping_generation_status='conflict'/);
   assert.match(admin, /enviopack\.shipment_ownership_conflict/);
   assert.match(admin, /SHIPMENT_OWNERSHIP_CONFLICT/);
-  assert.match(admin, /\['SHIPMENT_OWNERSHIP_CONFLICT','SHIPMENT_PROVIDER_MULTIPLE_MATCHES'\]\.includes\(error\?\.code\)/);
+  assert.match(admin, /\['SHIPMENT_OWNERSHIP_CONFLICT','SHIPMENT_PROVIDER_MULTIPLE_MATCHES','SHIPMENT_LOCAL_IDENTITY_CONFLICT'\]\.includes\(error\?\.code\)/);
+  assert.match(syncGuard, /currentShipmentId && currentShipmentId !== id/);
+  assert.match(syncGuard, /reason: 'identity_conflict'/);
 });
