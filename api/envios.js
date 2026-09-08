@@ -3,7 +3,7 @@ const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStock } = require('../lib/inventory');
 const { orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');
-const { findPaymentsByExternalReference } = require('../lib/payments');
+const { findPaymentsByExternalReference, findPreferenceByExternalReference, PREFERENCE_TTL_MS } = require('../lib/payments');
 const {
   shippingEnabled, normalizePostalCode, normalizeProvinceCode, normalizeCart, cartHash,
   buildPackages, quoteEnviopack, listLocalities, quoteEnviopackBranch,
@@ -57,6 +57,73 @@ async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
 }
 
 async function runAutomation(sql) {
+  const uncertainPreferences = await sql`
+    SELECT id,external_reference,shipping_quote_id,created_at FROM orders
+    WHERE status='pending' AND COALESCE(payment_status,'pending')='pending'
+      AND payment_id IS NULL AND payment_url IS NULL AND preference_id IS NULL
+      AND created_at < NOW()-INTERVAL '5 minutes'
+    ORDER BY created_at LIMIT 25
+  `;
+  let preferencesRecovered = 0;
+  let uncertainCancelled = 0;
+  let preferenceChecksFailed = 0;
+  let uncertainStockReleased = 0;
+
+  for (const order of uncertainPreferences) {
+    const ageMs = Date.now() - new Date(order.created_at).getTime();
+    let preference = null;
+    if (ageMs < PREFERENCE_TTL_MS) {
+      try {
+        preference = await findPreferenceByExternalReference(order.external_reference);
+      } catch (error) {
+        preferenceChecksFailed += 1;
+        console.warn('Mercado Pago preference reconciliation failed:', 'code=' + String(error?.code || 'MP_PREFERENCE_SEARCH_FAILED'), 'status=' + String(error?.providerStatus || 'unknown'));
+        continue;
+      }
+    }
+
+    if (preference) {
+      const recovered = await sql`
+        UPDATE orders SET preference_id=${preference.id},payment_url=${preference.init_point},payment_status_detail=NULL,updated_at=NOW()
+        WHERE id=${order.id} AND status='pending' AND payment_id IS NULL AND payment_url IS NULL
+        RETURNING id
+      `;
+      if (recovered.length) {
+        await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_recovered','pending',${JSON.stringify({ preference_id: preference.id })}::jsonb)`;
+        preferencesRecovered += 1;
+      }
+      continue;
+    }
+
+    if (ageMs < 2 * 60 * 60 * 1000) continue;
+
+    let payments;
+    try {
+      payments = await findPaymentsByExternalReference(order.external_reference);
+    } catch (error) {
+      preferenceChecksFailed += 1;
+      console.warn('Mercado Pago uncertain checkout payment check failed:', 'code=' + String(error?.code || 'MP_PAYMENT_SEARCH_FAILED'), 'status=' + String(error?.providerStatus || 'unknown'));
+      continue;
+    }
+    if (payments.length) continue;
+
+    const claimed = await sql`
+      UPDATE orders SET status='cancelled',payment_status='expired',payment_status_detail='preference_not_found',updated_at=NOW()
+      WHERE id=${order.id} AND status='pending' AND payment_id IS NULL AND payment_url IS NULL
+        AND COALESCE(payment_status,'pending')='pending'
+      RETURNING id
+    `;
+    if (!claimed.length) continue;
+
+    const released = await releaseReservedStock(sql, order.id, 'Liberación por preferencia de pago no confirmada');
+    uncertainStockReleased += released.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    if (order.shipping_quote_id) {
+      await sql`UPDATE shipping_quotes SET used_at=NULL,order_id=NULL WHERE id=${order.shipping_quote_id} AND order_id=${order.id}`;
+    }
+    await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${order.id},'payment.preference_expired','pending','cancelled',${JSON.stringify({ stock_released: released })}::jsonb)`;
+    uncertainCancelled += 1;
+  }
+
   const abandoned = await sql`
     SELECT id FROM orders
     WHERE status='pending' AND COALESCE(payment_status,'pending')='pending' AND payment_url IS NOT NULL
@@ -112,6 +179,10 @@ async function runAutomation(sql) {
   }
   const deliveredNotifications = await deliverPendingNotifications(sql, 20);
   return {
+    preferences_recovered: preferencesRecovered,
+    uncertain_cancelled: uncertainCancelled,
+    preference_checks_failed: preferenceChecksFailed,
+    uncertain_stock_units_released: uncertainStockReleased,
     abandoned_queued: abandoned.length,
     expired_cancelled: expiredCancelled,
     provider_payments_found: providerPaymentsFound,
