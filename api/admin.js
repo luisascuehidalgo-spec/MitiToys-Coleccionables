@@ -115,7 +115,9 @@ async function createShipment(sql, id) {
 
     let shipment;
     if (providerShipmentsBefore.length === 1) {
-      shipment = await getShipment(providerShipmentsBefore[0].id);
+      shipment = providerShipmentsBefore[0];
+      try { shipment = await getShipment(providerShipmentsBefore[0].id); }
+      catch (detailsError) { console.warn('existing shipment details unavailable:', 'code=' + String(detailsError?.code || detailsError?.name || 'DETAILS_ERROR'), 'status=' + String(detailsError?.providerStatus || 'unknown')); }
       reusedProviderShipment = true;
     } else {
       shipment = await createConfirmedShipment({
@@ -254,12 +256,16 @@ async function reconcileShipmentCreation(sql, id) {
     throw Object.assign(new Error('El envío encontrado ya está asociado a otro pedido local. Requiere revisión manual.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
   }
 
-  const details = await getShipment(shipmentId);
+  let details = shipments[0];
+  try { details = await getShipment(shipmentId); }
+  catch (detailsError) { console.warn('reconciled shipment details unavailable:', 'code=' + String(detailsError?.code || detailsError?.name || 'DETAILS_ERROR'), 'status=' + String(detailsError?.providerStatus || 'unknown')); }
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking, 120) || null;
   const providerShipmentState = String(details?.estado || shipments[0]?.estado || '');
   const state = providerState(details, []);
-  state.order = orderStatusFromShipping(order, state.order);
-  state.shipping = shippingStatusFromProvider(order.shipping_status, state.shipping);
+  const currentRows = await sql`SELECT status,payment_status,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
+  const currentOrder = currentRows[0] || order;
+  state.order = orderStatusFromShipping(currentOrder, state.order);
+  state.shipping = shippingStatusFromProvider(currentOrder.shipping_status, state.shipping);
   const labelReady = providerShipmentState.toUpperCase() === 'P';
   let updated;
   try {
@@ -270,6 +276,8 @@ async function reconcileShipmentCreation(sql, id) {
         shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
       WHERE id=${id} AND enviopack_shipment_id IS NULL
         AND shipping_generation_status IN ('uncertain','processing','failed','not_created')
+        AND payment_status IS NOT DISTINCT FROM ${currentOrder.payment_status}
+        AND status=${currentOrder.status}
       RETURNING status,payment_status
     `;
   } catch (error) {

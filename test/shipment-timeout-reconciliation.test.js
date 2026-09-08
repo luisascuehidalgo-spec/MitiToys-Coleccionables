@@ -141,6 +141,10 @@ test('admin bloquea el reintento automático ante resultado incierto y ofrece re
   assert.match(admin, /return reconcileShipmentCreation\(sql, id\)/);
   assert.match(admin, /WHERE id=\$\{id\} AND enviopack_shipment_id IS NULL/);
   assert.match(admin, /shipping_created_at=COALESCE\(shipping_created_at,NOW\(\)\)/);
+  assert.match(admin, /shipment = providerShipmentsBefore\[0\]/);
+  assert.match(admin, /let details = shipments\[0\]/);
+  assert.match(admin, /payment_status IS NOT DISTINCT FROM \$\{currentOrder\.payment_status\}/);
+  assert.match(admin, /AND status=\$\{currentOrder\.status\}/);
   assert.match(admin, /SHIPMENT_RECONCILIATION_RACE/);
   assert.match(admin, /source: 'reconciliation_unique_race'/);
   assert.match(ui, /\['not_created','failed'\]\.includes\(String\(o\.shipping_generation_status\|\|'not_created'\)\)/);
