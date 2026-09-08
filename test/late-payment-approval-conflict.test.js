@@ -56,9 +56,10 @@ test('webhook registra el conflicto sin reactivar ni liberar stock', () => {
   const block = webhook.slice(start, end);
 
   assert.match(block, /payment_status='approved'/);
-  assert.match(block, /payment_status_detail='late_approval_conflict'/);
+  assert.match(block, /const lateApprovalDetail = preservePaymentConflict \? 'multiple_approved_conflict' : 'late_approval_conflict'/);
+  assert.match(block, /payment_status_detail=\$\{lateApprovalDetail\}/);
   assert.match(block, /status=\$\{oldStatus\}/);
-  assert.match(block, /payment_status_detail IS DISTINCT FROM 'late_approval_conflict'/);
+  assert.match(block, /payment_status_detail IS DISTINCT FROM \$\{lateApprovalDetail\}/);
   assert.match(block, /RETURNING id/);
   assert.match(block, /if \(lateConflictRows\.length\)/);
   assert.match(block, /payment\.late_approval_conflict/);

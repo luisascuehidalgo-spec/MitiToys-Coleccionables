@@ -151,7 +151,8 @@ test('webhook usa máquina de estados y valida importe/moneda antes de aprobar',
   assert.match(webhook, /payment\.validation_failed/);
   assert.match(webhook, /total_amount,currency/);
   assert.match(webhook, /payment_status='validation_failed'/);
-  assert.match(webhook, /payment_status_detail='amount_or_currency_mismatch'/);
+  assert.match(webhook, /const validationDetail = preservePaymentConflict \? 'multiple_approved_conflict' : 'amount_or_currency_mismatch'/);
+  assert.match(webhook, /payment_status_detail=\$\{validationDetail\}/);
   assert.match(webhook, /provider_status: payment\.status/);
   assert.match(webhook, /releaseReservedStockIfUnshipped/);
 });
@@ -176,7 +177,7 @@ test('admin backend y UI comparten reglas respaldadas por Mercado Pago', () => {
 
 test('generación de envío revalida el pago y protege carreras con Enviopack', () => {
   const adminApi = read('api/admin.js');
-  assert.match(adminApi, /payment_status='approved' AND status NOT IN \('cancelled','refunded'\) AND enviopack_shipment_id IS NULL/);
+  assert.match(adminApi, /payment_status='approved' AND COALESCE\(payment_status_detail,''\)<>'multiple_approved_conflict'[\s\S]*status NOT IN \('cancelled','refunded'\) AND enviopack_shipment_id IS NULL/);
   assert.match(adminApi, /firstPaymentGuard/);
   assert.match(adminApi, /secondPaymentGuard/);
   assert.match(adminApi, /PAYMENT_CHANGED_DURING_SHIPMENT/);
