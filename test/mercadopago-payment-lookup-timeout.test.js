@@ -11,7 +11,7 @@ function freshPayments() {
   return require('../lib/payments');
 }
 
-test('getPayment usa timeout y no propaga errores de transporte', async t => {
+test('getPayment usa timeout acotado y no propaga errores de transporte', async t => {
   const oldFetch = global.fetch;
   const oldToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
   process.env.MERCADOPAGO_ACCESS_TOKEN = 'test-token';
@@ -28,7 +28,8 @@ test('getPayment usa timeout y no propaga errores de transporte', async t => {
     else process.env.MERCADOPAGO_ACCESS_TOKEN = oldToken;
   });
 
-  const { getPayment } = freshPayments();
+  const { getPayment, PAYMENT_LOOKUP_TIMEOUT_MS } = freshPayments();
+  assert.equal(PAYMENT_LOOKUP_TIMEOUT_MS, 6000);
   await assert.rejects(
     () => getPayment('123'),
     error => error.code === 'MP_PAYMENT_LOOKUP_FAILED'
