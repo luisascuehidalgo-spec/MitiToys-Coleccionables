@@ -1,0 +1,40 @@
+name: Apply Enviopack reconciliation state guard
+
+on:
+  push:
+    branches:
+      - fix/enviopack-ambiguous-shipment-timeout-20260908
+    paths:
+      - .github/workflows/apply-enviopack-reconcile-state-temp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/enviopack-ambiguous-shipment-timeout-20260908
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply reconciliation state guard
+        run: python3 .github/patch_enviopack_reconcile_state_guard.py
+      - name: Validate full suite
+        run: |
+          node --check api/admin.js
+          node --check lib/shipping.js
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Remove temporary files and commit
+        run: |
+          rm .github/patch_enviopack_reconcile_state_guard.py
+          rm .github/workflows/apply-enviopack-reconcile-state-temp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api/admin.js test/shipment-timeout-reconciliation.test.js .github/patch_enviopack_reconcile_state_guard.py .github/workflows/apply-enviopack-reconcile-state-temp.yml
+          git commit -m "Guard Enviopack reconciliation against stale order state"
+          git push origin HEAD:fix/enviopack-ambiguous-shipment-timeout-20260908
