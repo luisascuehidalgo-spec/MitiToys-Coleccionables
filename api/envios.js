@@ -2,7 +2,8 @@ const crypto = require('crypto');
 const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStock } = require('../lib/inventory');
-const { orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');
+const { requiresPaymentReview } = require('../lib/order-state');
+const { persistShippingObservation } = require('../lib/shipping-sync');
 const { findPaymentsByExternalReference, findPreferenceByExternalReference, paymentsRequireReservation, PREFERENCE_TTL_MS } = require('../lib/payments');
 const { persistPreferenceIdentity } = require('../lib/external-identities');
 const {
@@ -24,37 +25,46 @@ function shipmentState(details, tracking) {
 }
 
 async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
-  const orders = await sql`SELECT id,tracking_number,status,payment_status,shipping_status FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1`;
+  const orders = await sql`SELECT id FROM orders WHERE enviopack_shipment_id=${String(shipmentId)} LIMIT 1`;
   if (!orders.length) return null;
   const details = await getShipment(shipmentId);
   let tracking = [];
   if (loadTracking && String(details?.estado || '').toUpperCase() === 'P') {
     try { tracking = await getShipmentTracking(shipmentId); } catch (error) { console.warn('tracking unavailable:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown')); }
   }
-  const trackingNumber = String(details?.tracking_number || details?.numero_tracking || orders[0].tracking_number || '').trim() || null;
-  const state = shipmentState(details, tracking);
-  state.order = orderStatusFromShipping(orders[0], state.order);
-  state.shipping = shippingStatusFromProvider(orders[0].shipping_status, state.shipping);
+  const proposed = shipmentState(details, tracking);
+  const trackingNumber = String(details?.tracking_number || details?.numero_tracking || '').trim() || null;
+  const providerState = String(details?.estado || '') || null;
   const labelReady = String(details?.estado || '').toUpperCase() === 'P';
-  await sql`
-    UPDATE orders SET
-      enviopack_state=${String(details?.estado || '') || null},
-      tracking_number=${trackingNumber},
-      shipping_label_ready=${labelReady},
-      shipping_status=${state.shipping},
-      status=${state.order},
-      shipping_last_synced_at=NOW(),
-      shipping_last_error=NULL,
-      updated_at=NOW()
-    WHERE id=${orders[0].id}
-  `;
-  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${orders[0].id},'enviopack.synced',${orders[0].status},${state.order},${JSON.stringify({ shipment_id: String(shipmentId), provider_state: details?.estado || null, tracking_number: trackingNumber, tracking })}::jsonb)`;
-  if (trackingNumber && trackingNumber !== orders[0].tracking_number && orders[0].payment_status === 'approved') await queueAndSendOrderNotification(sql, orders[0].id, 'shipment_created');
-  if (state.order === 'delivered') {
+  const persisted = await persistShippingObservation(sql, {
+    orderId: orders[0].id,
+    providerState,
+    trackingNumber,
+    labelReady,
+    proposedOrderStatus: proposed.order,
+    proposedShippingStatus: proposed.shipping
+  });
+
+  if (!persisted.ok) {
+    console.warn('Enviopack webhook sync skipped:', 'reason=' + String(persisted.reason || 'race'));
+    return { details, tracking, trackingNumber, state: persisted.current || null, labelReady, stale: true };
+  }
+
+  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${orders[0].id},'enviopack.synced',${persisted.before.status},${persisted.order.status},${JSON.stringify({ shipment_id: String(shipmentId), provider_state: providerState, tracking_number: trackingNumber, tracking })}::jsonb)`;
+  if (trackingNumber && trackingNumber !== persisted.before.tracking_number && persisted.order.payment_status === 'approved' && !requiresPaymentReview(persisted.order)) {
+    await queueAndSendOrderNotification(sql, orders[0].id, 'shipment_created');
+  }
+  if (persisted.order.status === 'delivered' && persisted.order.payment_status === 'approved' && !requiresPaymentReview(persisted.order)) {
     await ensureReviewInvites(sql, orders[0].id);
     await queueAndSendOrderNotification(sql, orders[0].id, 'review_invite');
   }
-  return { details, tracking, trackingNumber, state, labelReady };
+  return {
+    details,
+    tracking,
+    trackingNumber,
+    state: { order: persisted.order.status, shipping: persisted.order.shipping_status },
+    labelReady
+  };
 }
 
 async function runAutomation(sql) {

@@ -199,13 +199,20 @@ test('envío ya creado nunca queda marcado como reintentable por una falla poste
 test('sync de Enviopack no pisa estados financieros, logísticos ni envía avisos con pago no aprobado', () => {
   const adminApi = read('api/admin.js');
   const envios = read('api/envios.js');
-  assert.match(adminApi, /orderStatusFromShipping\(order, state\.order\)/);
-  assert.match(adminApi, /shippingStatusFromProvider\(order\.shipping_status, state\.shipping\)/);
-  assert.match(adminApi, /order\.payment_status === 'approved'/);
-  assert.match(envios, /SELECT id,tracking_number,status,payment_status,shipping_status FROM orders/);
-  assert.match(envios, /orderStatusFromShipping\(orders\[0\], state\.order\)/);
-  assert.match(envios, /shippingStatusFromProvider\(orders\[0\]\.shipping_status, state\.shipping\)/);
-  assert.match(envios, /orders\[0\]\.payment_status === 'approved'/);
+  const syncGuard = read('lib/shipping-sync.js');
+
+  for (const source of [adminApi, envios]) {
+    assert.match(source, /persistShippingObservation\(sql/);
+    assert.match(source, /persisted\.order\.payment_status === 'approved'/);
+    assert.match(source, /!requiresPaymentReview\(persisted\.order\)/);
+  }
+
+  assert.match(syncGuard, /orderStatusFromShipping\(snapshot, proposedOrderStatus\)/);
+  assert.match(syncGuard, /shippingStatusFromProvider\(snapshot\.shipping_status, proposedShippingStatus\)/);
+  assert.match(syncGuard, /status IS NOT DISTINCT FROM \$\{snapshot\.status\}/);
+  assert.match(syncGuard, /payment_status IS NOT DISTINCT FROM \$\{snapshot\.payment_status\}/);
+  assert.match(syncGuard, /payment_status_detail IS NOT DISTINCT FROM \$\{snapshot\.payment_status_detail\}/);
+  assert.match(syncGuard, /shipping_status IS NOT DISTINCT FROM \$\{snapshot\.shipping_status\}/);
 });
 
 test('seguimiento público usa estado respaldado por el pago y logs sanitizados', () => {

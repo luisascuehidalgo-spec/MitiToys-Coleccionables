@@ -4,6 +4,7 @@ const { searchParams } = require('../lib/request-url');
 const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { expirePreference } = require('../lib/payments');
 const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider, requiresPaymentReview } = require('../lib/order-state');
+const { persistShippingObservation } = require('../lib/shipping-sync');
 const { shipmentOwner, shipmentConflictOwner } = require('../lib/external-identities');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
@@ -323,23 +324,31 @@ async function syncShipment(sql, id) {
     try { tracking = await getShipmentTracking(order.enviopack_shipment_id); } catch (error) { console.warn('tracking unavailable:', 'code=' + String(error?.code || 'unknown'), 'status=' + String(error?.providerStatus || 'unknown')); }
   }
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking || order.tracking_number, 120) || null;
-  const state = providerState(details, tracking);
-  state.order = orderStatusFromShipping(order, state.order);
-  state.shipping = shippingStatusFromProvider(order.shipping_status, state.shipping);
+  const proposed = providerState(details, tracking);
+  const providerShipmentState = String(details?.estado || '') || null;
   const labelReady = String(details?.estado || '').toUpperCase() === 'P';
-  await sql`
-    UPDATE orders SET enviopack_state=${String(details?.estado || '') || null},tracking_number=${trackingNumber},
-      shipping_label_ready=${labelReady},shipping_status=${state.shipping},status=${state.order},
-      shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
-    WHERE id=${id}
-  `;
-  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${order.status},${state.order},${JSON.stringify({ tracking_number: trackingNumber, tracking })}::jsonb)`;
-  if (trackingNumber && trackingNumber !== order.tracking_number && order.payment_status === 'approved' && !requiresPaymentReview(order)) await queueAndSendOrderNotification(sql, id, 'shipment_created');
-  if (state.order === 'delivered') {
+  const persisted = await persistShippingObservation(sql, {
+    orderId: id,
+    providerState: providerShipmentState,
+    trackingNumber,
+    labelReady,
+    proposedOrderStatus: proposed.order,
+    proposedShippingStatus: proposed.shipping
+  });
+
+  if (!persisted.ok) {
+    throw Object.assign(new Error('El pedido cambió mientras se sincronizaba Envíopack. Actualizá el panel y reintentá.'), { status: 409, code: 'SHIPMENT_SYNC_RACE' });
+  }
+
+  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.admin_sync',${persisted.before.status},${persisted.order.status},${JSON.stringify({ tracking_number: trackingNumber, tracking })}::jsonb)`;
+  if (trackingNumber && trackingNumber !== persisted.before.tracking_number && persisted.order.payment_status === 'approved' && !requiresPaymentReview(persisted.order)) {
+    await queueAndSendOrderNotification(sql, id, 'shipment_created');
+  }
+  if (persisted.order.status === 'delivered' && persisted.order.payment_status === 'approved' && !requiresPaymentReview(persisted.order)) {
     await ensureReviewInvites(sql, id);
     await queueAndSendOrderNotification(sql, id, 'review_invite');
   }
-  return { cached: false, tracking_number: trackingNumber, label_ready: labelReady, shipping_status: state.shipping, events: tracking };
+  return { cached: false, tracking_number: trackingNumber, label_ready: labelReady, shipping_status: persisted.order.shipping_status, events: tracking };
 }
 
 module.exports = async (req,res)=>{
