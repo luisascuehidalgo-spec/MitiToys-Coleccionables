@@ -250,7 +250,6 @@ async function createShipment(sql, id) {
   }
 }
 
-
 async function reconcileShipmentCreation(sql, id) {
   const order = await loadFulfillmentOrder(sql, id);
   if (!order) throw Object.assign(new Error('Pedido no encontrado.'), { status: 404 });
@@ -259,7 +258,20 @@ async function reconcileShipmentCreation(sql, id) {
 
   const shipments = await listEnviopackOrderShipments(order.enviopack_order_id);
   if (!shipments.length) {
-    await sql`UPDATE orders SET shipping_generation_status='uncertain',shipping_last_error=${clean('Todavía no aparece un envío asociado en Envíopack. No generes otro hasta confirmar el resultado.',1000)},updated_at=NOW() WHERE id=${id}`;
+    const marked = await sql`
+      UPDATE orders SET shipping_generation_status='uncertain',
+        shipping_last_error=${clean('Todavía no aparece un envío asociado en Envíopack. No generes otro hasta confirmar el resultado.',1000)},updated_at=NOW()
+      WHERE id=${id} AND enviopack_shipment_id IS NULL
+        AND shipping_generation_status IN ('not_created','failed','processing','uncertain')
+      RETURNING id
+    `;
+    if (marked.length) return { found: false, pending: true };
+    const currentRows = await sql`SELECT enviopack_shipment_id,shipping_generation_status FROM orders WHERE id=${id} LIMIT 1`;
+    const current = currentRows[0] || null;
+    if (current?.enviopack_shipment_id) return { found: true, reused: true, shipment_id: String(current.enviopack_shipment_id) };
+    if (String(current?.shipping_generation_status || '') === 'conflict') {
+      throw Object.assign(new Error('El pedido quedó en conflicto mientras se verificaba Envíopack. Revisalo antes de continuar.'), { status: 409, code: 'SHIPMENT_RECONCILIATION_CONFLICT' });
+    }
     return { found: false, pending: true };
   }
   if (shipments.length > 1) {
@@ -282,25 +294,19 @@ async function reconcileShipmentCreation(sql, id) {
   const trackingNumber = clean(details?.tracking_number || details?.numero_tracking, 120) || null;
   const providerShipmentState = String(details?.estado || shipments[0]?.estado || '');
   const state = providerState(details, []);
-  const currentRows = await sql`SELECT status,payment_status,payment_status_detail,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
-  const currentOrder = currentRows[0] || order;
-  state.order = orderStatusFromShipping(currentOrder, state.order);
-  state.shipping = shippingStatusFromProvider(currentOrder.shipping_status, state.shipping);
   const labelReady = providerShipmentState.toUpperCase() === 'P';
-  let updated;
+  let persisted;
   try {
-    updated = await sql`
-      UPDATE orders SET enviopack_shipment_id=${shipmentId},enviopack_state=${providerShipmentState || null},
-        tracking_number=${trackingNumber},shipping_label_ready=${labelReady},shipping_generation_status='created',
-        shipping_status=${state.shipping},status=${state.order},shipping_created_at=COALESCE(shipping_created_at,NOW()),
-        shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
-      WHERE id=${id} AND enviopack_shipment_id IS NULL
-        AND shipping_generation_status IN ('uncertain','processing','failed','not_created')
-        AND payment_status IS NOT DISTINCT FROM ${currentOrder.payment_status}
-        AND payment_status_detail IS NOT DISTINCT FROM ${currentOrder.payment_status_detail}
-        AND status=${currentOrder.status}
-      RETURNING status,payment_status,payment_status_detail
-    `;
+    persisted = await persistCreatedShipment(sql, {
+      orderId: id,
+      shipmentId,
+      providerState: providerShipmentState,
+      trackingNumber,
+      labelReady,
+      proposedOrderStatus: state.order,
+      proposedShippingStatus: state.shipping,
+      attempts: 3
+    });
   } catch (error) {
     const raceOwner = await shipmentConflictOwner(sql, error, shipmentId, id);
     if (raceOwner) {
@@ -311,18 +317,18 @@ async function reconcileShipmentCreation(sql, id) {
     throw error;
   }
 
-  if (!updated.length) {
-    const currentRows = await sql`SELECT enviopack_shipment_id,tracking_number,shipping_label_ready,status FROM orders WHERE id=${id} LIMIT 1`;
-    const current = currentRows[0] || null;
-    if (String(current?.enviopack_shipment_id || '') === shipmentId) {
-      return { found: true, reused: true, shipment_id: shipmentId, tracking_number: current.tracking_number || trackingNumber, label_ready: Boolean(current.shipping_label_ready), order_status: current.status || state.order };
+  if (!persisted.ok) {
+    if (['identity_conflict','generation_conflict'].includes(persisted.reason)) {
+      throw Object.assign(new Error('El pedido tiene otra identidad logística o quedó en conflicto durante la reconciliación.'), { status: 409, code: 'SHIPMENT_RECONCILIATION_CONFLICT' });
     }
     throw Object.assign(new Error('El pedido cambió mientras se verificaba Envíopack. Actualizá el panel antes de continuar.'), { status: 409, code: 'SHIPMENT_RECONCILIATION_RACE' });
   }
 
-  await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.shipment_reconciled',${order.status},${state.order},${JSON.stringify({ provider_order_id: order.enviopack_order_id, shipment_id: shipmentId, provider_state: providerShipmentState })}::jsonb)`;
-  if (trackingNumber && updated[0]?.payment_status === 'approved' && !requiresPaymentReview(updated[0])) await queueAndSendOrderNotification(sql, id, 'shipment_created');
-  return { found: true, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady, order_status: state.order };
+  if (!persisted.reused) {
+    await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${id},'enviopack.shipment_reconciled',${persisted.before.status},${persisted.order.status},${JSON.stringify({ provider_order_id: order.enviopack_order_id, shipment_id: shipmentId, provider_state: providerShipmentState })}::jsonb)`;
+  }
+  if (trackingNumber && persisted.order.payment_status === 'approved' && !requiresPaymentReview(persisted.order)) await queueAndSendOrderNotification(sql, id, 'shipment_created');
+  return { found: true, reused: Boolean(persisted.reused), shipment_id: shipmentId, tracking_number: persisted.order.tracking_number || trackingNumber, label_ready: labelReady, order_status: persisted.order.status };
 }
 
 async function syncShipment(sql, id) {
