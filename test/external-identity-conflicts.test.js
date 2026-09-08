@@ -143,6 +143,8 @@ test('23505 solo se clasifica como ownership conflict cuando el shipment pertene
   const sqlNoOwner = async () => { calls += 1; return []; };
   assert.equal(await shipmentConflictOwner(sqlNoOwner, { code: '40001' }, 'ship-1', 77), null);
   assert.equal(calls, 0);
+  assert.equal(await shipmentConflictOwner(sqlNoOwner, { code: '23505' }, null, 77), null);
+  assert.equal(calls, 0);
   assert.equal(await shipmentConflictOwner(sqlNoOwner, { code: '23505' }, 'ship-1', 77), null);
   assert.equal(calls, 1);
 
