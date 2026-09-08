@@ -1,7 +1,7 @@
 from pathlib import Path
 
-p = Path('api/admin.js')
-s = p.read_text()
+admin_path = Path('api/admin.js')
+s = admin_path.read_text()
 
 old_import = "const { isUniqueViolation, shipmentOwner } = require('../lib/external-identities');"
 new_import = "const { shipmentOwner, shipmentConflictOwner } = require('../lib/external-identities');"
@@ -33,4 +33,38 @@ new = """if (providerShipment?.id) {
 if old not in s:
     raise SystemExit('shipment unique catch block target missing')
 s = s.replace(old, new, 1)
-p.write_text(s)
+admin_path.write_text(s)
+
+test_path = Path('test/external-identity-conflicts.test.js')
+t = test_path.read_text()
+t = t.replace(
+    "const { isUniqueViolation, persistPreferenceIdentity } = require('../lib/external-identities');",
+    "const { isUniqueViolation, persistPreferenceIdentity, shipmentConflictOwner } = require('../lib/external-identities');",
+    1
+)
+t = t.replace(
+    "  assert.match(admin, /isUniqueViolation\\(error\\)/);",
+    "  assert.match(admin, /shipmentConflictOwner\\(sql, error, recoveredShipmentId, id\\)/);\n  assert.match(admin, /if \\(conflictOwner\\)/);",
+    1
+)
+marker = "test('Enviopack bloquea ownership conflict y evita un segundo despacho automático', () => {"
+extra = """test('23505 solo se clasifica como ownership conflict cuando el shipment pertenece a otro pedido', async () => {
+  let calls = 0;
+  const sqlNoOwner = async () => { calls += 1; return []; };
+  assert.equal(await shipmentConflictOwner(sqlNoOwner, { code: '40001' }, 'ship-1', 77), null);
+  assert.equal(calls, 0);
+  assert.equal(await shipmentConflictOwner(sqlNoOwner, { code: '23505' }, 'ship-1', 77), null);
+  assert.equal(calls, 1);
+
+  const sqlOtherOwner = async (strings) => {
+    assert.match(strings.join('?'), /enviopack_shipment_id/);
+    return [{ id: 91 }];
+  };
+  assert.equal(await shipmentConflictOwner(sqlOtherOwner, { code: '23505' }, 'ship-1', 77), 91);
+});
+
+"""
+if marker not in t:
+    raise SystemExit('shipment conflict test marker missing')
+t = t.replace(marker, extra + marker, 1)
+test_path.write_text(t)
