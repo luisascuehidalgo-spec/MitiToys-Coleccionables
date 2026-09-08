@@ -1,0 +1,131 @@
+name: Apply external identity conflict guards
+on:
+  push:
+    branches: [fix/external-identity-conflict-handling-20260908]
+    paths: [.github/workflows/apply-external-identity-conflicts-temp.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/external-identity-conflict-handling-20260908
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Patch guarded persistence paths
+        shell: python
+        run: |
+          from pathlib import Path
+
+          checkout = Path('api/crear-preferencia-carrito.js')
+          s = checkout.read_text()
+          old = "const { PUBLIC_BASE_URL, preferenceWindow, createPreferenceWithReconciliation } = require('../lib/payments');\n"
+          new = old + "const { persistPreferenceIdentity } = require('../lib/external-identities');\n"
+          if old not in s: raise SystemExit('checkout import target missing')
+          s = s.replace(old, new, 1)
+          old = "    await sql`UPDATE orders SET preference_id=${mercadoPago.id},payment_url=${mercadoPago.init_point},payment_status_detail=NULL,updated_at=NOW() WHERE id=${orderId}`;\n"
+          new = """    const preferenceIdentity = await persistPreferenceIdentity(sql, { orderId, preferenceId: mercadoPago.id, paymentUrl: mercadoPago.init_point });
+    if (!preferenceIdentity.ok) {
+      await sql`UPDATE orders SET payment_status_detail='preference_ownership_conflict',updated_at=NOW() WHERE id=${orderId}`;
+      await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${orderId},'payment.preference_ownership_conflict','pending',${JSON.stringify({ preference_id: mercadoPago.id, conflict_order_id: preferenceIdentity.conflictOrderId || null })}::jsonb)`;
+      return res.status(202).json({
+        init_point: `${origin}/pedido.html?pedido=${encodeURIComponent(orderNumber)}&pago=verificando`,
+        pending_confirmation: true,
+        order_number: orderNumber,
+        subtotal,
+        shipping_amount: shippingAmount,
+        total
+      });
+    }
+"""
+          if old not in s: raise SystemExit('checkout preference persistence target missing')
+          s = s.replace(old, new, 1)
+          checkout.write_text(s)
+
+          envios = Path('api/envios.js')
+          s = envios.read_text()
+          old = "const { findPaymentsByExternalReference, findPreferenceByExternalReference, PREFERENCE_TTL_MS } = require('../lib/payments');\n"
+          new = old + "const { persistPreferenceIdentity } = require('../lib/external-identities');\n"
+          if old not in s: raise SystemExit('envios import target missing')
+          s = s.replace(old, new, 1)
+          old = """      const recovered = await sql`
+        UPDATE orders SET preference_id=${preference.id},payment_url=${preference.init_point},payment_status_detail=NULL,updated_at=NOW()
+        WHERE id=${order.id} AND status='pending' AND payment_id IS NULL AND payment_url IS NULL
+        RETURNING id
+      `;
+      if (recovered.length) {
+        await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_recovered','pending',${JSON.stringify({ preference_id: preference.id })}::jsonb)`;
+        preferencesRecovered += 1;
+      }
+      continue;
+"""
+          new = """      const recovered = await persistPreferenceIdentity(sql, { orderId: order.id, preferenceId: preference.id, paymentUrl: preference.init_point });
+      if (!recovered.ok) {
+        const marked = await sql`UPDATE orders SET payment_status_detail='preference_ownership_conflict',updated_at=NOW() WHERE id=${order.id} AND payment_status_detail IS DISTINCT FROM 'preference_ownership_conflict' RETURNING id`;
+        if (marked.length) await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_ownership_conflict','pending',${JSON.stringify({ preference_id: preference.id, conflict_order_id: recovered.conflictOrderId || null })}::jsonb)`;
+        continue;
+      }
+      await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${order.id},'payment.preference_recovered','pending',${JSON.stringify({ preference_id: preference.id })}::jsonb)`;
+      preferencesRecovered += 1;
+      continue;
+"""
+          if old not in s: raise SystemExit('envios preference recovery target missing')
+          s = s.replace(old, new, 1)
+          envios.write_text(s)
+
+          admin = Path('api/admin.js')
+          s = admin.read_text()
+          old = "const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider } = require('../lib/order-state');\n"
+          new = old + "const { isUniqueViolation, shipmentOwner } = require('../lib/external-identities');\n"
+          if old not in s: raise SystemExit('admin import target missing')
+          s = s.replace(old, new, 1)
+          old = """    const shipmentId = String(shipment.id);
+    const providerShipmentState = String(shipment.estado || '');
+"""
+          new = """    const shipmentId = String(shipment.id);
+    const existingShipmentOwner = await shipmentOwner(sql, shipmentId, id);
+    if (existingShipmentOwner) {
+      await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('Envíopack devolvió un shipment_id que ya pertenece a otro pedido. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
+      await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_ownership_conflict',${order.status},${JSON.stringify({ shipment_id: shipmentId, conflict_order_id: existingShipmentOwner })}::jsonb)`;
+      throw Object.assign(new Error('Envíopack devolvió un identificador de envío ya asociado a otro pedido. No vuelvas a generar el envío hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
+    }
+    const providerShipmentState = String(shipment.estado || '');
+"""
+          if old not in s: raise SystemExit('admin shipment id target missing')
+          s = s.replace(old, new, 1)
+          old = """  } catch (error) {
+    if (providerShipment?.id) {
+"""
+          new = """  } catch (error) {
+    if (error?.code === 'SHIPMENT_OWNERSHIP_CONFLICT') throw error;
+    if (isUniqueViolation(error) && providerShipment?.id) {
+      const conflictingShipmentId = String(providerShipment.id);
+      const conflictOwner = await shipmentOwner(sql, conflictingShipmentId, id);
+      await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('Conflicto de ownership del shipment_id detectado por PostgreSQL. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
+      await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_ownership_conflict',${order.status},${JSON.stringify({ shipment_id: conflictingShipmentId, conflict_order_id: conflictOwner || null, source: 'unique_constraint' })}::jsonb)`;
+      throw Object.assign(new Error('El identificador de envío ya está asociado a otro pedido. No vuelvas a generar el envío hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
+    }
+    if (providerShipment?.id) {
+"""
+          if old not in s: raise SystemExit('admin catch target missing')
+          s = s.replace(old, new, 1)
+          admin.write_text(s)
+      - name: Run syntax and regression tests
+        run: |
+          node --check api/crear-preferencia-carrito.js
+          node --check api/envios.js
+          node --check api/admin.js
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Remove temporary workflow and commit patch
+        run: |
+          rm .github/workflows/apply-external-identity-conflicts-temp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add api/crear-preferencia-carrito.js api/envios.js api/admin.js .github/workflows/apply-external-identity-conflicts-temp.yml
+          git commit -m "Handle external order identity conflicts safely"
+          git push origin HEAD:fix/external-identity-conflict-handling-20260908
