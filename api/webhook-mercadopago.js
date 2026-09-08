@@ -76,6 +76,33 @@ module.exports = async (req, res) => {
 
       if (rows.length) {
         const order = rows[0];
+        const paymentId = String(payment.id || dataId);
+        const ownership = await sql`
+          SELECT id FROM orders
+          WHERE payment_id=${paymentId} AND id<>${order.id}
+          LIMIT 1
+        `;
+
+        if (ownership.length) {
+          await sql`
+            INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
+            VALUES(
+              ${order.id},'payment.ownership_conflict',${order.status},${order.status},
+              ${JSON.stringify({
+                payment_id: paymentId,
+                conflicting_order_id: ownership[0].id,
+                external_reference: payment.external_reference
+              })}::jsonb
+            )
+          `;
+          console.error(
+            'Mercado Pago payment ownership conflict:',
+            'code=PAYMENT_OWNERSHIP_CONFLICT',
+            'order_id=' + String(order.id)
+          );
+          return res.status(200).json({ received: true, ownership_conflict: true });
+        }
+
         let customerId = order.customer_id;
         const payer = payment.payer || {};
         const email = String(payer.email || '').trim().toLowerCase();
@@ -103,7 +130,7 @@ module.exports = async (req, res) => {
           await sql`
             UPDATE orders SET
               customer_id=${customerId},
-              payment_id=${String(payment.id)},
+              payment_id=${paymentId},
               payment_status='validation_failed',
               payment_status_detail='amount_or_currency_mismatch',
               updated_at=NOW()
@@ -114,7 +141,7 @@ module.exports = async (req, res) => {
             VALUES(
               ${order.id},'payment.validation_failed',${oldStatus},${oldStatus},
               ${JSON.stringify({
-                payment_id: payment.id,
+                payment_id: paymentId,
                 provider_status: payment.status,
                 provider_status_detail: payment.status_detail || null,
                 transaction_amount: payment.transaction_amount,
@@ -132,7 +159,7 @@ module.exports = async (req, res) => {
         const newStatus = orderStatusFromPayment(oldStatus, payment.status);
         await sql`
           UPDATE orders SET
-            customer_id=${customerId},payment_id=${String(payment.id)},
+            customer_id=${customerId},payment_id=${paymentId},
             payment_status=${payment.status || null},payment_status_detail=${payment.status_detail || null},
             status=${newStatus},updated_at=NOW()
           WHERE id=${order.id}
@@ -152,7 +179,7 @@ module.exports = async (req, res) => {
           VALUES(
             ${order.id},${body.action || 'payment.notification'},${oldStatus},${newStatus},
             ${JSON.stringify({
-              payment_id: payment.id,
+              payment_id: paymentId,
               status: payment.status,
               status_detail: payment.status_detail,
               transaction_amount: payment.transaction_amount,
@@ -177,6 +204,12 @@ module.exports = async (req, res) => {
 
     return res.status(200).json({ received: true, payment_id: payment.id, status: payment.status });
   } catch (error) {
+    const constraint = String(error?.constraint || '');
+    if (error?.code === '23505' && /orders_payment_id_unique|payment_id/i.test(constraint)) {
+      console.error('Mercado Pago payment ownership conflict:', 'code=PAYMENT_OWNERSHIP_CONFLICT');
+      return res.status(200).json({ received: true, ownership_conflict: true });
+    }
+
     console.error(
       'Webhook Mercado Pago error:',
       'code=' + String(error?.code || error?.name || 'WEBHOOK_ERROR'),
