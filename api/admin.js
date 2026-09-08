@@ -378,14 +378,18 @@ module.exports = async (req,res)=>{
     if(req.method==='GET' && query.get('action')==='label'){
       const id=Number(query.get('id'));
       if(!Number.isInteger(id)||id<1) return res.status(400).json({error:'Pedido inválido.'});
-      const rows=await sql`SELECT order_number,enviopack_shipment_id,shipping_label_ready FROM orders WHERE id=${id} LIMIT 1`;
+      const rows=await sql`SELECT order_number,enviopack_shipment_id,shipping_label_ready,status,payment_status,payment_status_detail FROM orders WHERE id=${id} LIMIT 1`;
       if(!rows.length||!rows[0].enviopack_shipment_id) return res.status(404).json({error:'El pedido no tiene un envío generado.'});
-      if(!rows[0].shipping_label_ready) return res.status(409).json({error:'La etiqueta estará disponible cuando Envíopack termine de procesar el envío.'});
-      const response=await getShipmentLabel(rows[0].enviopack_shipment_id);
+      const order=rows[0];
+      if(order.payment_status!=='approved'||requiresPaymentReview(order)||['cancelled','refunded'].includes(String(order.status||''))) {
+        return res.status(409).json({code:'SHIPMENT_LABEL_PAYMENT_REVIEW',error:'No se puede imprimir la etiqueta porque el pago o el pedido requiere revisión. Verificá Mercado Pago y Envíopack antes de despachar.'});
+      }
+      if(!order.shipping_label_ready) return res.status(409).json({error:'La etiqueta estará disponible cuando Envíopack termine de procesar el envío.'});
+      const response=await getShipmentLabel(order.enviopack_shipment_id);
       if(!response.ok) return res.status(response.status).json({error:'Envíopack todavía no pudo generar la etiqueta.'});
       const buffer=Buffer.from(await response.arrayBuffer());
       res.setHeader('Content-Type','application/pdf');
-      res.setHeader('Content-Disposition',`inline; filename="Mititoys-${clean(rows[0].order_number,50)}.pdf"`);
+      res.setHeader('Content-Disposition',`inline; filename="Mititoys-${clean(order.order_number,50)}.pdf"`);
       res.setHeader('Cache-Control','private, no-store');
       return res.status(200).send(buffer);
     }
