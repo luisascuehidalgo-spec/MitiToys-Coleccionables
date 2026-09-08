@@ -54,9 +54,12 @@ test('una notificación ya enviada nunca vuelve a llamar a Resend', async t => {
   assert.equal(fetchCalls, 0);
 });
 
-test('la defensa terminal existe también dentro de sendNotification', () => {
+test('sent, sending, delivery_uncertain y failed son terminales para reenvío automático', () => {
   const notifications = read('lib/notifications.js');
-  const sentGuards = notifications.match(/notification\.status === 'sent'/g) || [];
-  assert.ok(sentGuards.length >= 2, 'Falta guard terminal en queueAndSend y sendNotification');
+  assert.match(notifications, /AUTO_TERMINAL_NOTIFICATION_STATUSES = new Set\(\['sent', 'sending', 'delivery_uncertain', 'failed'\]\)/);
+  assert.match(notifications, /AUTO_TERMINAL_NOTIFICATION_STATUSES\.has\(status\)/);
   assert.match(notifications, /reason: 'already_sent'/);
+  assert.match(notifications, /reason: 'in_flight'/);
+  assert.match(notifications, /WHERE status IN \('pending','pending_configuration'\)/);
+  assert.doesNotMatch(notifications, /WHERE status IN \('pending','pending_configuration','failed'\)/);
 });
