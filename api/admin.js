@@ -4,7 +4,7 @@ const { searchParams } = require('../lib/request-url');
 const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { expirePreference } = require('../lib/payments');
 const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider, requiresPaymentReview } = require('../lib/order-state');
-const { persistShippingObservation } = require('../lib/shipping-sync');
+const { persistShippingObservation, persistCreatedShipment } = require('../lib/shipping-sync');
 const { shipmentOwner, shipmentConflictOwner } = require('../lib/external-identities');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
@@ -138,61 +138,65 @@ async function createShipment(sql, id) {
     providerShipment = shipment;
     if (!shipment?.id) throw Object.assign(new Error('Envíopack devolvió una respuesta de envío inválida.'), { status: 502, code: 'INVALID_SHIPMENT_RESPONSE' });
     const shipmentId = String(shipment.id);
-const existingShipmentOwner = await shipmentOwner(sql, shipmentId, id);
-if (existingShipmentOwner) {
-  await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('Envíopack devolvió un shipment_id que ya pertenece a otro pedido. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
-  await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_ownership_conflict',${order.status},${JSON.stringify({ shipment_id: shipmentId, conflict_order_id: existingShipmentOwner })}::jsonb)`;
-  throw Object.assign(new Error('Envíopack devolvió un identificador de envío ya asociado a otro pedido. No vuelvas a generar el envío hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
-}
-const providerShipmentState = String(shipment.estado || '');
+    const existingShipmentOwner = await shipmentOwner(sql, shipmentId, id);
+    if (existingShipmentOwner) {
+      await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('Envíopack devolvió un shipment_id que ya pertenece a otro pedido. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
+      await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_ownership_conflict',${order.status},${JSON.stringify({ shipment_id: shipmentId, conflict_order_id: existingShipmentOwner })}::jsonb)`;
+      throw Object.assign(new Error('Envíopack devolvió un identificador de envío ya asociado a otro pedido. No vuelvas a generar el envío hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
+    }
+    const providerShipmentState = String(shipment.estado || '');
     const trackingNumber = clean(shipment.tracking_number || shipment.numero_tracking, 120) || null;
     const labelReady = providerShipmentState.toUpperCase() === 'P';
-    const currentRows = await sql`SELECT status,payment_status,payment_status_detail,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
-    const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
-    const finalOrderStatus = orderStatusFromShipping(currentOrder, 'processing');
-    const finalShippingStatus = shippingStatusFromProvider(currentOrder.shipping_status, 'preparing');
-    const updated = await sql`
-      UPDATE orders SET
-        enviopack_shipment_id=${shipmentId},enviopack_state=${providerShipmentState || null},
-        shipping_destination_type=${order.shipping_destination_type},
-        shipping_street=${order.shipping_street || null},shipping_number=${order.shipping_number || null},
-        shipping_branch_id=${order.shipping_branch_id || null},shipping_branch_name=${order.shipping_branch_name || null},
-        shipping_branch_address=${order.shipping_branch_address || null},
-        tracking_number=${trackingNumber},shipping_label_ready=${labelReady},
-        shipping_generation_status='created',shipping_status=${finalShippingStatus},status=${finalOrderStatus},
-        shipping_created_at=NOW(),shipping_last_synced_at=NOW(),shipping_last_error=NULL,updated_at=NOW()
-      WHERE id=${id}
-      RETURNING status,payment_status,payment_status_detail
-    `;
-    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created',${finalOrderStatus},${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;
-    if (trackingNumber && updated[0]?.payment_status === 'approved' && !requiresPaymentReview(updated[0])) await queueAndSendOrderNotification(sql, id, 'shipment_created');
-    return { reused: reusedProviderShipment, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady, order_status: finalOrderStatus };
+    const persisted = await persistCreatedShipment(sql, {
+      orderId: id,
+      shipmentId,
+      providerState: providerShipmentState,
+      trackingNumber,
+      labelReady,
+      destination: {
+        type: order.shipping_destination_type,
+        street: order.shipping_street || null,
+        number: order.shipping_number || null,
+        branchId: order.shipping_branch_id || null,
+        branchName: order.shipping_branch_name || null,
+        branchAddress: order.shipping_branch_address || null
+      }
+    });
+    if (!persisted.ok) {
+      if (['identity_conflict','generation_conflict'].includes(persisted.reason)) {
+        throw Object.assign(new Error('El pedido ya tiene otra identidad logística o quedó en conflicto. No generes otro envío.'), { status: 409, code: 'SHIPMENT_LOCAL_IDENTITY_CONFLICT' });
+      }
+      throw Object.assign(new Error('El envío fue creado en Envíopack, pero el pedido cambió mientras se confirmaba localmente.'), { status: 502, code: 'SHIPMENT_CREATED_PERSISTENCE_RACE' });
+    }
+    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_created',${persisted.order.status},${JSON.stringify({ provider_order_id: providerOrderId, shipment_id: shipmentId, provider_state: providerShipmentState, tracking_number: trackingNumber })}::jsonb)`;
+    if (trackingNumber && persisted.order.payment_status === 'approved' && !requiresPaymentReview(persisted.order)) await queueAndSendOrderNotification(sql, id, 'shipment_created');
+    return { reused: reusedProviderShipment, shipment_id: shipmentId, tracking_number: trackingNumber, label_ready: labelReady, order_status: persisted.order.status };
   } catch (error) {
-if (['SHIPMENT_OWNERSHIP_CONFLICT','SHIPMENT_PROVIDER_MULTIPLE_MATCHES'].includes(error?.code)) throw error;
-if (error?.code === 'SHIPPING_PROVIDER_UNCERTAIN' && providerOrderId) {
-  let discoveredShipments = [];
-  try {
-    discoveredShipments = await listEnviopackOrderShipments(providerOrderId);
-  } catch (reconcileError) {
-    console.warn('shipment uncertainty reconciliation failed:', 'code=' + String(reconcileError?.code || reconcileError?.name || 'RECONCILE_ERROR'));
-  }
-  const beforeIds = new Set(providerShipmentsBefore.map(item => String(item.id)));
-  const newShipments = discoveredShipments.filter(item => !beforeIds.has(String(item.id)));
-  if (discoveredShipments.length > 1 || newShipments.length > 1) {
-    await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('El resultado del alta fue incierto y Envíopack informa múltiples envíos asociados. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
-    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.multiple_shipments_detected',${order.status},${JSON.stringify({ provider_order_id: providerOrderId, shipment_ids: discoveredShipments.map(item => item.id), source: 'timeout_reconciliation' })}::jsonb)`;
-    throw Object.assign(new Error('Envíopack informa múltiples envíos para este pedido. No generes otro hasta revisarlos.'), { status: 409, code: 'SHIPMENT_PROVIDER_MULTIPLE_MATCHES' });
-  }
-  if (newShipments.length === 1) {
-    return reconcileShipmentCreation(sql, id);
-  }
-  if (!providerShipment) {
-    await sql`UPDATE orders SET shipping_generation_status='uncertain',shipping_last_error=${clean('No se pudo confirmar si Envíopack creó el envío. No generes otro: usá Verificar en Envíopack.',1000)},updated_at=NOW() WHERE id=${id}`;
-    await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_creation_uncertain',${order.status},${JSON.stringify({ provider_order_id: providerOrderId })}::jsonb)`;
-    throw Object.assign(new Error('No se pudo confirmar si Envíopack creó el envío. No lo vuelvas a generar; usá Verificar en Envíopack.'), { status: 409, code: 'SHIPMENT_CREATION_UNCERTAIN' });
-  }
-}
-if (providerShipment?.id) {
+    if (['SHIPMENT_OWNERSHIP_CONFLICT','SHIPMENT_PROVIDER_MULTIPLE_MATCHES','SHIPMENT_LOCAL_IDENTITY_CONFLICT'].includes(error?.code)) throw error;
+    if (error?.code === 'SHIPPING_PROVIDER_UNCERTAIN' && providerOrderId) {
+      let discoveredShipments = [];
+      try {
+        discoveredShipments = await listEnviopackOrderShipments(providerOrderId);
+      } catch (reconcileError) {
+        console.warn('shipment uncertainty reconciliation failed:', 'code=' + String(reconcileError?.code || reconcileError?.name || 'RECONCILE_ERROR'));
+      }
+      const beforeIds = new Set(providerShipmentsBefore.map(item => String(item.id)));
+      const newShipments = discoveredShipments.filter(item => !beforeIds.has(String(item.id)));
+      if (discoveredShipments.length > 1 || newShipments.length > 1) {
+        await sql`UPDATE orders SET shipping_generation_status='conflict',shipping_last_error=${clean('El resultado del alta fue incierto y Envíopack informa múltiples envíos asociados. Requiere revisión manual.',1000)},updated_at=NOW() WHERE id=${id}`;
+        await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.multiple_shipments_detected',${order.status},${JSON.stringify({ provider_order_id: providerOrderId, shipment_ids: discoveredShipments.map(item => item.id), source: 'timeout_reconciliation' })}::jsonb)`;
+        throw Object.assign(new Error('Envíopack informa múltiples envíos para este pedido. No generes otro hasta revisarlos.'), { status: 409, code: 'SHIPMENT_PROVIDER_MULTIPLE_MATCHES' });
+      }
+      if (newShipments.length === 1) {
+        return reconcileShipmentCreation(sql, id);
+      }
+      if (!providerShipment) {
+        await sql`UPDATE orders SET shipping_generation_status='uncertain',shipping_last_error=${clean('No se pudo confirmar si Envíopack creó el envío. No generes otro: usá Verificar en Envíopack.',1000)},updated_at=NOW() WHERE id=${id}`;
+        await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${id},'enviopack.shipment_creation_uncertain',${order.status},${JSON.stringify({ provider_order_id: providerOrderId })}::jsonb)`;
+        throw Object.assign(new Error('No se pudo confirmar si Envíopack creó el envío. No lo vuelvas a generar; usá Verificar en Envíopack.'), { status: 409, code: 'SHIPMENT_CREATION_UNCERTAIN' });
+      }
+    }
+    if (providerShipment?.id) {
       const recoveredShipmentId = String(providerShipment.id);
       const conflictOwner = await shipmentConflictOwner(sql, error, recoveredShipmentId, id);
       if (conflictOwner) {
@@ -201,20 +205,28 @@ if (providerShipment?.id) {
         throw Object.assign(new Error('El identificador de envío ya está asociado a otro pedido. No vuelvas a generarlo hasta revisarlo.'), { status: 409, code: 'SHIPMENT_OWNERSHIP_CONFLICT' });
       }
       const recoveredProviderState = String(providerShipment.estado || '');
+      const recoveryMessage = clean('El envío fue creado en Envíopack, pero una etapa posterior no se completó. Sincronizá el tracking antes de realizar otra acción.', 1000);
       try {
-        const currentRows = await sql`SELECT status,payment_status,payment_status_detail,shipping_status FROM orders WHERE id=${id} LIMIT 1`;
-        const currentOrder = currentRows[0] || { status: 'pending', payment_status: null };
-        const recoveredOrderStatus = orderStatusFromShipping(currentOrder, 'processing');
-        const recoveredShippingStatus = shippingStatusFromProvider(currentOrder.shipping_status, 'preparing');
-        await sql`
-          UPDATE orders SET
-            enviopack_shipment_id=COALESCE(enviopack_shipment_id,${recoveredShipmentId}),
-            enviopack_state=COALESCE(enviopack_state,${recoveredProviderState || null}),
-            shipping_generation_status='created',shipping_status=${recoveredShippingStatus},status=${recoveredOrderStatus},
-            shipping_last_error=${clean('El envío fue creado en Envíopack, pero una etapa posterior no se completó. Sincronizá el tracking antes de realizar otra acción.', 1000)},
-            updated_at=NOW()
-          WHERE id=${id}
-        `;
+        const recovery = await persistCreatedShipment(sql, {
+          orderId: id,
+          shipmentId: recoveredShipmentId,
+          providerState: recoveredProviderState,
+          trackingNumber: clean(providerShipment.tracking_number || providerShipment.numero_tracking, 120) || null,
+          labelReady: recoveredProviderState.toUpperCase() === 'P',
+          destination: {
+            type: order.shipping_destination_type,
+            street: order.shipping_street || null,
+            number: order.shipping_number || null,
+            branchId: order.shipping_branch_id || null,
+            branchName: order.shipping_branch_name || null,
+            branchAddress: order.shipping_branch_address || null
+          },
+          lastError: recoveryMessage,
+          attempts: 3
+        });
+        if (!recovery.ok) {
+          console.error('shipment created but local recovery failed:', 'code=' + String(recovery.reason || 'PERSIST_RACE'));
+        }
       } catch (persistError) {
         console.error('shipment created but local recovery failed:', 'code=' + String(persistError?.code || persistError?.name || 'PERSIST_ERROR'));
       }

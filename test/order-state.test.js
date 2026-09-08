@@ -177,21 +177,27 @@ test('admin backend y UI comparten reglas respaldadas por Mercado Pago', () => {
 
 test('generación de envío revalida el pago y protege carreras con Enviopack', () => {
   const adminApi = read('api/admin.js');
+  const syncGuard = read('lib/shipping-sync.js');
   assert.match(adminApi, /payment_status='approved'[\s\S]*COALESCE\(payment_status_detail,''\) NOT IN \('multiple_approved_conflict','partially_refunded'\)[\s\S]*status NOT IN \('cancelled','refunded'\) AND enviopack_shipment_id IS NULL/);
   assert.match(adminApi, /firstPaymentGuard/);
   assert.match(adminApi, /secondPaymentGuard/);
   assert.match(adminApi, /PAYMENT_CHANGED_DURING_SHIPMENT/);
-  assert.match(adminApi, /orderStatusFromShipping\(currentOrder, 'processing'\)/);
-  assert.match(adminApi, /shippingStatusFromProvider\(currentOrder\.shipping_status, 'preparing'\)/);
+  assert.match(adminApi, /persistCreatedShipment\(sql/);
+  assert.match(syncGuard, /orderStatusFromShipping\(snapshot, 'processing'\)/);
+  assert.match(syncGuard, /shippingStatusFromProvider\(snapshot\.shipping_status, 'preparing'\)/);
+  assert.match(syncGuard, /payment_status IS NOT DISTINCT FROM \$\{snapshot\.payment_status\}/);
+  assert.match(syncGuard, /shipping_generation_status IS NOT DISTINCT FROM \$\{snapshot\.shipping_generation_status\}/);
   assert.match(adminApi, /enviopack\.generation_aborted/);
   assert.match(adminApi, /releaseReservedStockIfUnshipped/);
 });
 
 test('envío ya creado nunca queda marcado como reintentable por una falla posterior', () => {
   const adminApi = read('api/admin.js');
+  const syncGuard = read('lib/shipping-sync.js');
   assert.match(adminApi, /providerShipment = shipment/);
-  assert.match(adminApi, /enviopack_shipment_id=COALESCE\(enviopack_shipment_id,\$\{recoveredShipmentId\}\)/);
-  assert.match(adminApi, /shipping_generation_status='created'/);
+  assert.match(adminApi, /persistCreatedShipment\(sql/);
+  assert.match(syncGuard, /enviopack_shipment_id=COALESCE\(enviopack_shipment_id,\$\{id\}\)/);
+  assert.match(syncGuard, /shipping_generation_status='created'/);
   assert.match(adminApi, /SHIPMENT_CREATED_SYNC_FAILED/);
   assert.match(adminApi, /No vuelvas a generarlo/);
 });
