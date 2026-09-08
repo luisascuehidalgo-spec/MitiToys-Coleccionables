@@ -6,6 +6,7 @@ const { expirePreference } = require('../lib/payments');
 const { adminStatusError, orderStatusFromShipping, shippingStatusFromProvider, requiresPaymentReview } = require('../lib/order-state');
 const { persistShippingObservation, persistCreatedShipment } = require('../lib/shipping-sync');
 const { shipmentOwner, shipmentConflictOwner } = require('../lib/external-identities');
+const { loadAdminOrderSnapshot, persistAdminOrderUpdate } = require('../lib/admin-order-update');
 const {
   buildPackages, getOrCreateEnviopackOrder, createConfirmedShipment,
   getShipment, getShipmentTracking, getShipmentLabel, listEnviopackOrderShipments
@@ -377,14 +378,18 @@ module.exports = async (req,res)=>{
     if(req.method==='GET' && query.get('action')==='label'){
       const id=Number(query.get('id'));
       if(!Number.isInteger(id)||id<1) return res.status(400).json({error:'Pedido inválido.'});
-      const rows=await sql`SELECT order_number,enviopack_shipment_id,shipping_label_ready FROM orders WHERE id=${id} LIMIT 1`;
+      const rows=await sql`SELECT order_number,enviopack_shipment_id,shipping_label_ready,status,payment_status,payment_status_detail FROM orders WHERE id=${id} LIMIT 1`;
       if(!rows.length||!rows[0].enviopack_shipment_id) return res.status(404).json({error:'El pedido no tiene un envío generado.'});
-      if(!rows[0].shipping_label_ready) return res.status(409).json({error:'La etiqueta estará disponible cuando Envíopack termine de procesar el envío.'});
-      const response=await getShipmentLabel(rows[0].enviopack_shipment_id);
+      const order=rows[0];
+      if(order.payment_status!=='approved'||requiresPaymentReview(order)||['cancelled','refunded'].includes(String(order.status||''))) {
+        return res.status(409).json({code:'SHIPMENT_LABEL_PAYMENT_REVIEW',error:'No se puede imprimir la etiqueta porque el pago o el pedido requiere revisión. Verificá Mercado Pago y Envíopack antes de despachar.'});
+      }
+      if(!order.shipping_label_ready) return res.status(409).json({error:'La etiqueta estará disponible cuando Envíopack termine de procesar el envío.'});
+      const response=await getShipmentLabel(order.enviopack_shipment_id);
       if(!response.ok) return res.status(response.status).json({error:'Envíopack todavía no pudo generar la etiqueta.'});
       const buffer=Buffer.from(await response.arrayBuffer());
       res.setHeader('Content-Type','application/pdf');
-      res.setHeader('Content-Disposition',`inline; filename="Mititoys-${clean(rows[0].order_number,50)}.pdf"`);
+      res.setHeader('Content-Disposition',`inline; filename="Mititoys-${clean(order.order_number,50)}.pdf"`);
       res.setHeader('Cache-Control','private, no-store');
       return res.status(200).send(buffer);
     }
@@ -435,9 +440,8 @@ module.exports = async (req,res)=>{
       const phone=req.body?.shipping_phone==null?null:clean(req.body.shipping_phone,50);
       const notes=req.body?.shipping_notes==null?null:clean(req.body.shipping_notes,1000);
       if(!Number.isInteger(id)||id<1||!VALID.has(status)) return res.status(400).json({error:'Datos de pedido inválidos.'});
-      const before=await sql`SELECT status,payment_id,payment_status,payment_status_detail,preference_id FROM orders WHERE id=${id}`;
-      if(!before.length) return res.status(404).json({error:'Pedido no encontrado.'});
-      const previous=before[0];
+      const previous=await loadAdminOrderSnapshot(sql,id);
+      if(!previous) return res.status(404).json({error:'Pedido no encontrado.'});
       const transitionError=adminStatusError({currentStatus:previous.status,targetStatus:status,paymentId:previous.payment_id,paymentStatus:previous.payment_status,paymentStatusDetail:previous.payment_status_detail});
       if(transitionError) return res.status(409).json({error:transitionError});
       if(previous.status!==status && status==='cancelled' && !previous.payment_id && previous.preference_id) {
@@ -448,7 +452,17 @@ module.exports = async (req,res)=>{
         }
       }
       const shippingStatus=status==='shipped'?'in_transit':status==='delivered'?'delivered':status==='processing'?'preparing':'not_shipped';
-      const rows=await sql`UPDATE orders SET status=${status},shipping_status=${shippingStatus},shipping_recipient=${recipient},shipping_address=${address||null},shipping_street=${street},shipping_number=${number},shipping_floor=${floor},shipping_unit=${unit},shipping_city=${city},shipping_postal_code=${postal},shipping_phone=${phone},shipping_notes=${notes},shipping_carrier=${carrier},tracking_number=${tracking},updated_at=NOW() WHERE id=${id} RETURNING *`;
+      const persisted=await persistAdminOrderUpdate(sql,{
+        id,previous,status,shippingStatus,recipient,address,street,number,floor,unit,city,postal,phone,notes,carrier,tracking
+      });
+      if(!persisted.ok) {
+        return res.status(409).json({
+          code:'ORDER_CHANGED_DURING_ADMIN_UPDATE',
+          error:'El pedido cambió mientras guardabas. Actualizá el panel y revisá el estado de pago y envío antes de reintentar.',
+          order:persisted.current||null
+        });
+      }
+      const updatedOrder=persisted.order;
       let stockRelease=null;
       if(previous.status!==status && (status==='cancelled'||status==='refunded')) {
         stockRelease=await releaseReservedStockIfUnshipped(sql,id,status==='refunded'?'Liberación por reembolso confirmado':'Liberación por cancelación confirmada');
@@ -459,7 +473,7 @@ module.exports = async (req,res)=>{
         if(notificationType) await queueAndSendOrderNotification(sql,id,notificationType);
         if(status==='delivered'){await ensureReviewInvites(sql,id);await queueAndSendOrderNotification(sql,id,'review_invite');}
       }
-      return res.status(200).json({order:rows[0]});
+      return res.status(200).json({order:updatedOrder});
     }
 
     if(req.method==='PUT'){

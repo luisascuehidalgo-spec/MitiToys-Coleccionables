@@ -5,6 +5,7 @@ const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { orderStatusFromPayment, isLateApprovalConflict } = require('../lib/order-state');
 const { getPayment } = require('../lib/payments');
 const { paymentIdentityDecision, isPartialRefund } = require('../lib/payment-reconciliation');
+const { resolvePaymentCas } = require('../lib/payment-order-cas');
 const { queueAndSendOrderNotification } = require('../lib/notifications');
 
 function parseSignatureHeader(value) {
@@ -153,11 +154,22 @@ module.exports = async (req, res) => {
 
         if (identityDecision === 'multiple_approved_conflict') {
           const amountMatchesOrder = paymentMatchesOrder(payment, order);
-          await sql`
+          const conflictRows = await sql`
             UPDATE orders SET payment_status_detail='multiple_approved_conflict',updated_at=NOW()
             WHERE id=${order.id}
+              AND status IS NOT DISTINCT FROM ${order.status}
+              AND payment_id IS NOT DISTINCT FROM ${order.payment_id}
+              AND payment_status IS NOT DISTINCT FROM ${order.payment_status}
+              AND payment_status_detail IS NOT DISTINCT FROM ${order.payment_status_detail}
               AND payment_status_detail IS DISTINCT FROM 'multiple_approved_conflict'
+            RETURNING id
           `;
+          await resolvePaymentCas(sql, order, {
+            status: order.status,
+            payment_id: order.payment_id,
+            payment_status: order.payment_status,
+            payment_status_detail: 'multiple_approved_conflict'
+          }, conflictRows);
           const conflictEvents = await sql`
             INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
             SELECT
@@ -239,6 +251,10 @@ module.exports = async (req, res) => {
               payment_id=${paymentId},payment_status='approved',
               payment_status_detail=${partialRefundDetail},status=${oldStatus},updated_at=NOW()
             WHERE id=${order.id}
+              AND status IS NOT DISTINCT FROM ${order.status}
+              AND payment_id IS NOT DISTINCT FROM ${order.payment_id}
+              AND payment_status IS NOT DISTINCT FROM ${order.payment_status}
+              AND payment_status_detail IS NOT DISTINCT FROM ${order.payment_status_detail}
               AND (
                 payment_id IS DISTINCT FROM ${paymentId}
                 OR payment_status IS DISTINCT FROM 'approved'
@@ -246,6 +262,12 @@ module.exports = async (req, res) => {
               )
             RETURNING id
           `;
+          await resolvePaymentCas(sql, order, {
+            status: oldStatus,
+            payment_id: paymentId,
+            payment_status: 'approved',
+            payment_status_detail: partialRefundDetail
+          }, partialRows);
           const partialEvents = await sql`
             INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
             SELECT
@@ -293,6 +315,10 @@ module.exports = async (req, res) => {
               payment_status_detail=${validationDetail},
               updated_at=NOW()
             WHERE id=${order.id}
+              AND status IS NOT DISTINCT FROM ${order.status}
+              AND payment_id IS NOT DISTINCT FROM ${order.payment_id}
+              AND payment_status IS NOT DISTINCT FROM ${order.payment_status}
+              AND payment_status_detail IS NOT DISTINCT FROM ${order.payment_status_detail}
               AND (
                 payment_id IS DISTINCT FROM ${paymentId}
                 OR payment_status IS DISTINCT FROM 'validation_failed'
@@ -300,6 +326,12 @@ module.exports = async (req, res) => {
               )
             RETURNING id
           `;
+          await resolvePaymentCas(sql, order, {
+            status: oldStatus,
+            payment_id: paymentId,
+            payment_status: 'validation_failed',
+            payment_status_detail: validationDetail
+          }, validationRows);
           if (validationRows.length) {
             await sql`
               INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
@@ -329,6 +361,10 @@ module.exports = async (req, res) => {
               payment_id=${paymentId},payment_status='approved',
               payment_status_detail=${lateApprovalDetail},status=${oldStatus},updated_at=NOW()
             WHERE id=${order.id}
+              AND status IS NOT DISTINCT FROM ${order.status}
+              AND payment_id IS NOT DISTINCT FROM ${order.payment_id}
+              AND payment_status IS NOT DISTINCT FROM ${order.payment_status}
+              AND payment_status_detail IS NOT DISTINCT FROM ${order.payment_status_detail}
               AND (
                 payment_id IS DISTINCT FROM ${paymentId}
                 OR payment_status IS DISTINCT FROM 'approved'
@@ -336,6 +372,12 @@ module.exports = async (req, res) => {
               )
             RETURNING id
           `;
+          await resolvePaymentCas(sql, order, {
+            status: oldStatus,
+            payment_id: paymentId,
+            payment_status: 'approved',
+            payment_status_detail: lateApprovalDetail
+          }, lateConflictRows);
 
           if (lateConflictRows.length) {
             await sql`
@@ -379,6 +421,10 @@ module.exports = async (req, res) => {
             payment_status=${providerPaymentStatus},payment_status_detail=${providerPaymentStatusDetail},
             status=${newStatus},updated_at=NOW()
           WHERE id=${order.id}
+            AND status IS NOT DISTINCT FROM ${order.status}
+            AND payment_id IS NOT DISTINCT FROM ${order.payment_id}
+            AND payment_status IS NOT DISTINCT FROM ${order.payment_status}
+            AND payment_status_detail IS NOT DISTINCT FROM ${order.payment_status_detail}
             AND (
               payment_id IS DISTINCT FROM ${paymentId}
               OR payment_status IS DISTINCT FROM ${providerPaymentStatus}
@@ -387,6 +433,12 @@ module.exports = async (req, res) => {
             )
           RETURNING id
         `;
+        await resolvePaymentCas(sql, order, {
+          status: newStatus,
+          payment_id: paymentId,
+          payment_status: providerPaymentStatus,
+          payment_status_detail: providerPaymentStatusDetail
+        }, paymentUpdateRows);
         const duplicateSnapshot = paymentUpdateRows.length === 0;
 
         let stockRelease = null;
