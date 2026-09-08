@@ -17,11 +17,13 @@ test('webhook no reprocesa un estado de pago idéntico', () => {
 });
 
 test('validation_failed y late approval solo generan evento cuando cambia el marcador persistido', () => {
-  assert.match(webhook, /const validationRows = await sql`[\s\S]*payment_status IS DISTINCT FROM 'validation_failed'[\s\S]*RETURNING id/);
+  assert.match(webhook, /const validationDetail = preservePaymentConflict \? 'multiple_approved_conflict' : 'amount_or_currency_mismatch'/);
+  assert.match(webhook, /const validationRows = await sql`[\s\S]*payment_status IS DISTINCT FROM 'validation_failed'[\s\S]*payment_status_detail IS DISTINCT FROM \$\{validationDetail\}[\s\S]*RETURNING id/);
   assert.match(webhook, /if \(validationRows\.length\) \{[\s\S]*'payment\.validation_failed'/);
   assert.match(webhook, /duplicate: validationRows\.length === 0/);
 
-  assert.match(webhook, /const lateConflictRows = await sql`[\s\S]*payment_status_detail IS DISTINCT FROM 'late_approval_conflict'[\s\S]*RETURNING id/);
+  assert.match(webhook, /const lateApprovalDetail = preservePaymentConflict \? 'multiple_approved_conflict' : 'late_approval_conflict'/);
+  assert.match(webhook, /const lateConflictRows = await sql`[\s\S]*payment_status_detail IS DISTINCT FROM \$\{lateApprovalDetail\}[\s\S]*RETURNING id/);
   assert.match(webhook, /if \(lateConflictRows\.length\) \{[\s\S]*'payment\.late_approval_conflict'/);
   assert.match(webhook, /duplicate: lateConflictRows\.length === 0/);
   assert.doesNotMatch(webhook, /const alreadyMarked =/);
