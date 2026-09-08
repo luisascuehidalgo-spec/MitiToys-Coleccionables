@@ -330,10 +330,7 @@ module.exports = async (req, res) => {
             )
           RETURNING id
         `;
-
-        if (!paymentUpdateRows.length) {
-          return res.status(200).json({ received: true, payment_id: payment.id, status: payment.status, duplicate: true });
-        }
+        const duplicateSnapshot = paymentUpdateRows.length === 0;
 
         let stockRelease = null;
         if (newStatus === 'cancelled' || newStatus === 'refunded') {
@@ -344,10 +341,15 @@ module.exports = async (req, res) => {
           );
         }
 
-        await sql`
+        const eventStatus = String(payment.status || '');
+        const eventStatusDetail = String(payment.status_detail || '');
+        const paymentEventType = ['payment.created', 'payment.updated'].includes(body.action)
+          ? body.action
+          : 'payment.notification';
+        const paymentEventRows = await sql`
           INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
-          VALUES(
-            ${order.id},${body.action || 'payment.notification'},${oldStatus},${newStatus},
+          SELECT
+            ${order.id},${paymentEventType},${oldStatus},${newStatus},
             ${JSON.stringify({
               payment_id: paymentId,
               status: payment.status,
@@ -356,17 +358,30 @@ module.exports = async (req, res) => {
               currency_id: payment.currency_id || null,
               stock_release: stockRelease
             })}::jsonb
+          WHERE NOT EXISTS (
+            SELECT 1 FROM order_events
+            WHERE order_id=${order.id}
+              AND event_type IN ('payment.created','payment.updated','payment.notification')
+              AND payload->>'payment_id'=${paymentId}
+              AND COALESCE(payload->>'status','')=${eventStatus}
+              AND COALESCE(payload->>'status_detail','')=${eventStatusDetail}
           )
+          RETURNING id
         `;
 
-        if (oldStatus !== newStatus) {
-          const notificationType = {
-            approved: 'payment_approved',
-            cancelled: 'order_cancelled',
-            refunded: 'order_refunded'
-          }[newStatus];
-          if (notificationType) await queueAndSendOrderNotification(sql, order.id, notificationType);
-        }
+        let notificationType = null;
+        if (providerPaymentStatus === 'approved' && newStatus === 'approved') notificationType = 'payment_approved';
+        if (['cancelled','rejected'].includes(String(providerPaymentStatus || '')) && newStatus === 'cancelled') notificationType = 'order_cancelled';
+        if (['refunded','charged_back'].includes(String(providerPaymentStatus || '')) && newStatus === 'refunded') notificationType = 'order_refunded';
+        if (notificationType) await queueAndSendOrderNotification(sql, order.id, notificationType);
+
+        return res.status(200).json({
+          received: true,
+          payment_id: payment.id,
+          status: payment.status,
+          duplicate: duplicateSnapshot,
+          event_recovered: duplicateSnapshot && paymentEventRows.length > 0
+        });
       } else {
         console.warn('Webhook recibido sin pedido asociado:', String(payment.external_reference).slice(0, 120));
       }
