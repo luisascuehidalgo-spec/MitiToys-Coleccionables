@@ -71,6 +71,37 @@ test('timeout de transporte durante POST /envios queda como resultado incierto, 
   }
 });
 
+test('POST /envios 2xx sin shipment_id o 5xx también queda incierto', async () => {
+  const oldFetch = global.fetch;
+  const oldKey = process.env.ENVIOPACK_API_KEY;
+  const oldSecret = process.env.ENVIOPACK_SECRET_KEY;
+  const oldDeposit = process.env.ENVIOPACK_DEPOSIT_ID;
+  process.env.ENVIOPACK_API_KEY = 'test-key';
+  process.env.ENVIOPACK_SECRET_KEY = 'test-secret';
+  process.env.ENVIOPACK_DEPOSIT_ID = '1';
+  try {
+    for (const providerResponse of [response(null, 200), response({ error: 'internal' }, 500)]) {
+      let call = 0;
+      global.fetch = async () => {
+        call += 1;
+        if (call === 1) return response({ access_token: 'test-token' });
+        return providerResponse;
+      };
+      const { createConfirmedShipment } = freshShipping();
+      await assert.rejects(
+        () => createConfirmedShipment(shipmentInput()),
+        error => error?.code === 'SHIPPING_PROVIDER_UNCERTAIN'
+      );
+      assert.equal(call, 2);
+    }
+  } finally {
+    global.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.ENVIOPACK_API_KEY; else process.env.ENVIOPACK_API_KEY = oldKey;
+    if (oldSecret === undefined) delete process.env.ENVIOPACK_SECRET_KEY; else process.env.ENVIOPACK_SECRET_KEY = oldSecret;
+    if (oldDeposit === undefined) delete process.env.ENVIOPACK_DEPOSIT_ID; else process.env.ENVIOPACK_DEPOSIT_ID = oldDeposit;
+  }
+});
+
 test('se pueden consultar los shipments asociados al pedido para reconciliar sin crear otro', async () => {
   const oldFetch = global.fetch;
   const oldKey = process.env.ENVIOPACK_API_KEY;
