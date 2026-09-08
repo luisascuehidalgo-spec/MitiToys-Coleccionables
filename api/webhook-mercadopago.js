@@ -4,6 +4,7 @@ const { searchParams } = require('../lib/request-url');
 const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
 const { orderStatusFromPayment, isLateApprovalConflict } = require('../lib/order-state');
 const { getPayment } = require('../lib/payments');
+const { paymentIdentityDecision } = require('../lib/payment-reconciliation');
 const { queueAndSendOrderNotification } = require('../lib/notifications');
 
 function parseSignatureHeader(value) {
@@ -115,6 +116,86 @@ module.exports = async (req, res) => {
           return res.status(200).json({ received: true, ownership_conflict: true });
         }
 
+        const identityDecision = paymentIdentityDecision(order, payment);
+        const currentPaymentId = String(order.payment_id || '').trim();
+        const incomingPaymentStatus = String(payment.status || '').trim().toLowerCase();
+
+        if (identityDecision === 'ignore_secondary') {
+          const ignoredEvents = await sql`
+            INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
+            SELECT
+              ${order.id},'payment.secondary_attempt_ignored',${order.status},${order.status},
+              ${JSON.stringify({
+                payment_id: paymentId,
+                status: incomingPaymentStatus || null,
+                status_detail: payment.status_detail || null,
+                current_payment_id: currentPaymentId,
+                current_payment_status: order.payment_status || null,
+                reason: 'different_non_approved_payment'
+              })}::jsonb
+            WHERE NOT EXISTS (
+              SELECT 1 FROM order_events
+              WHERE order_id=${order.id}
+                AND event_type='payment.secondary_attempt_ignored'
+                AND payload->>'payment_id'=${paymentId}
+                AND COALESCE(payload->>'status','')=${incomingPaymentStatus}
+            )
+            RETURNING id
+          `;
+          return res.status(200).json({
+            received: true,
+            payment_id: payment.id,
+            status: payment.status,
+            secondary_payment_ignored: true,
+            duplicate: ignoredEvents.length === 0
+          });
+        }
+
+        if (identityDecision === 'multiple_approved_conflict') {
+          const amountMatchesOrder = paymentMatchesOrder(payment, order);
+          await sql`
+            UPDATE orders SET payment_status_detail='multiple_approved_conflict',updated_at=NOW()
+            WHERE id=${order.id}
+              AND payment_status_detail IS DISTINCT FROM 'multiple_approved_conflict'
+          `;
+          const conflictEvents = await sql`
+            INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
+            SELECT
+              ${order.id},'payment.multiple_approved_conflict',${order.status},${order.status},
+              ${JSON.stringify({
+                payment_id: paymentId,
+                provider_status: payment.status || null,
+                provider_status_detail: payment.status_detail || null,
+                transaction_amount: payment.transaction_amount,
+                currency_id: payment.currency_id || null,
+                amount_and_currency_match: amountMatchesOrder,
+                current_payment_id: currentPaymentId,
+                current_payment_status: order.payment_status || null,
+                current_payment_status_detail: order.payment_status_detail || null,
+                reason: 'different_approved_payment'
+              })}::jsonb
+            WHERE NOT EXISTS (
+              SELECT 1 FROM order_events
+              WHERE order_id=${order.id}
+                AND event_type='payment.multiple_approved_conflict'
+                AND payload->>'payment_id'=${paymentId}
+            )
+            RETURNING id
+          `;
+          console.error(
+            'Mercado Pago multiple approved payment conflict:',
+            'code=MULTIPLE_APPROVED_PAYMENT_CONFLICT',
+            'order_id=' + String(order.id)
+          );
+          return res.status(200).json({
+            received: true,
+            payment_id: payment.id,
+            status: payment.status,
+            multiple_approved_conflict: true,
+            duplicate: conflictEvents.length === 0
+          });
+        }
+
         let customerId = order.customer_id;
         const payer = payment.payer || {};
         const email = String(payer.email || '').trim().toLowerCase();
@@ -143,20 +224,22 @@ module.exports = async (req, res) => {
         }
 
         const oldStatus = order.status;
+        const preservePaymentConflict = order.payment_status_detail === 'multiple_approved_conflict';
         const approvedMismatch = payment.status === 'approved' && !paymentMatchesOrder(payment, order);
 
         if (approvedMismatch) {
+          const validationDetail = preservePaymentConflict ? 'multiple_approved_conflict' : 'amount_or_currency_mismatch';
           const validationRows = await sql`
             UPDATE orders SET
               payment_id=${paymentId},
               payment_status='validation_failed',
-              payment_status_detail='amount_or_currency_mismatch',
+              payment_status_detail=${validationDetail},
               updated_at=NOW()
             WHERE id=${order.id}
               AND (
                 payment_id IS DISTINCT FROM ${paymentId}
                 OR payment_status IS DISTINCT FROM 'validation_failed'
-                OR payment_status_detail IS DISTINCT FROM 'amount_or_currency_mismatch'
+                OR payment_status_detail IS DISTINCT FROM ${validationDetail}
               )
             RETURNING id
           `;
@@ -183,15 +266,16 @@ module.exports = async (req, res) => {
         }
 
         if (isLateApprovalConflict(oldStatus, payment.status)) {
+          const lateApprovalDetail = preservePaymentConflict ? 'multiple_approved_conflict' : 'late_approval_conflict';
           const lateConflictRows = await sql`
             UPDATE orders SET
               payment_id=${paymentId},payment_status='approved',
-              payment_status_detail='late_approval_conflict',status=${oldStatus},updated_at=NOW()
+              payment_status_detail=${lateApprovalDetail},status=${oldStatus},updated_at=NOW()
             WHERE id=${order.id}
               AND (
                 payment_id IS DISTINCT FROM ${paymentId}
                 OR payment_status IS DISTINCT FROM 'approved'
-                OR payment_status_detail IS DISTINCT FROM 'late_approval_conflict'
+                OR payment_status_detail IS DISTINCT FROM ${lateApprovalDetail}
               )
             RETURNING id
           `;
@@ -229,7 +313,9 @@ module.exports = async (req, res) => {
 
         const newStatus = orderStatusFromPayment(oldStatus, payment.status);
         const providerPaymentStatus = payment.status || null;
-        const providerPaymentStatusDetail = payment.status_detail || null;
+        const providerPaymentStatusDetail = preservePaymentConflict
+          ? 'multiple_approved_conflict'
+          : (payment.status_detail || null);
         const paymentUpdateRows = await sql`
           UPDATE orders SET
             payment_id=${paymentId},
