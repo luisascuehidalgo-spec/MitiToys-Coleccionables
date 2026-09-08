@@ -147,6 +147,7 @@ test('admin bloquea el reintento automático ante resultado incierto y ofrece re
   assert.match(admin, /AND status=\$\{currentOrder\.status\}/);
   assert.match(admin, /SHIPMENT_RECONCILIATION_RACE/);
   assert.match(admin, /source: 'reconciliation_unique_race'/);
+  assert.match(admin, /if \(!updated\.length\)[\s\S]{0,700}reused: true/);
   assert.match(ui, /\['not_created','failed'\]\.includes\(String\(o\.shipping_generation_status\|\|'not_created'\)\)/);
   assert.match(ui, /reconcile_shipment/);
   assert.match(ui, /VERIFICAR EN ENVÍOPACK/);
