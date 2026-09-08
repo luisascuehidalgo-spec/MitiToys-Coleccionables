@@ -4,8 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { paymentIdentityDecision } = require('../lib/payment-reconciliation');
+const { hasPaymentConflict, orderStatusFromShipping, adminStatusError, adminStatusOptions } = require('../lib/order-state');
 
 const webhook = fs.readFileSync(path.join(__dirname, '..', 'api', 'webhook-mercadopago.js'), 'utf8');
+const adminApi = fs.readFileSync(path.join(__dirname, '..', 'api', 'admin.js'), 'utf8');
 
 test('mismo payment_id o primer payment_id se procesa normalmente', () => {
   assert.equal(paymentIdentityDecision({ payment_id: null, payment_status: 'pending' }, { id: 'p1', status: 'pending' }), 'process');
@@ -69,4 +71,36 @@ test('el marcador de múltiples aprobados sobrevive reintentos posteriores del p
 test('eventos secundarios se deduplican por payment_id y estado', () => {
   assert.match(webhook, /event_type='payment\.secondary_attempt_ignored'[\s\S]*payload->>'payment_id'=\$\{paymentId\}[\s\S]*COALESCE\(payload->>'status',''\)=\$\{incomingPaymentStatus\}/);
   assert.match(webhook, /event_type='payment\.multiple_approved_conflict'[\s\S]*payload->>'payment_id'=\$\{paymentId\}/);
+});
+
+test('multiple_approved_conflict bloquea fulfillment aunque payment_status siga approved', () => {
+  const conflictOrder = {
+    status: 'approved',
+    payment_id: 'canonical',
+    payment_status: 'approved',
+    payment_status_detail: 'multiple_approved_conflict'
+  };
+  assert.equal(hasPaymentConflict(conflictOrder), true);
+  assert.equal(orderStatusFromShipping(conflictOrder, 'processing'), 'approved');
+  assert.match(
+    adminStatusError({
+      currentStatus: 'approved',
+      targetStatus: 'processing',
+      paymentId: 'canonical',
+      paymentStatus: 'approved',
+      paymentStatusDetail: 'multiple_approved_conflict'
+    }),
+    /conflicto entre pagos aprobados/i
+  );
+  assert.deepEqual(adminStatusOptions(conflictOrder), ['approved']);
+});
+
+test('backend de Enviopack revalida el conflicto antes de crear un shipment', () => {
+  assert.match(adminApi, /hasPaymentConflict\(order\)[\s\S]*PAYMENT_CONFLICT_REQUIRES_REVIEW/);
+  assert.match(adminApi, /payment_status='approved' AND COALESCE\(payment_status_detail,''\)<>'multiple_approved_conflict'/);
+  assert.match(adminApi, /const firstPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail/);
+  assert.match(adminApi, /const secondPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail/);
+  assert.match(adminApi, /const finalPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail/);
+  assert.match(adminApi, /hasPaymentConflict\(finalPaymentGuard\[0\]\)/);
+  assert.match(adminApi, /paymentStatusDetail:previous\.payment_status_detail/);
 });
