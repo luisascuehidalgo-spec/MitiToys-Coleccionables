@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Apply patch
+      - name: Apply exact patch
         run: python3 .github/patch_shipment_unique_classification.py
       - name: Validate syntax and tests
         run: |
