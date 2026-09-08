@@ -1,8 +1,8 @@
-name: Apply Mercado Pago webhook timeout
+name: mp-webhook-timeout
 on:
   push:
-    branches: [fix/mercadopago-webhook-timeout-20260908]
-    paths: [.github/workflows/apply-mp-webhook-timeout-temp.yml]
+    branches:
+      - fix/mercadopago-webhook-timeout-20260908
 permissions:
   contents: write
 jobs:
@@ -15,56 +15,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Replace direct payment fetch with bounded helper
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('api/webhook-mercadopago.js')
-          s=p.read_text()
-          anchor="const { orderStatusFromPayment, isLateApprovalConflict } = require('../lib/order-state');\n"
-          if anchor not in s: raise SystemExit('order-state import not found')
-          s=s.replace(anchor, anchor+"const { getPayment } = require('../lib/payments');\n",1)
-          old="""    const token = process.env.MERCADOPAGO_ACCESS_TOKEN;
-    if (!token) return res.status(500).json({ error: 'Falta configurar MERCADOPAGO_ACCESS_TOKEN.' });
-
-    const paymentResponse = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(dataId)}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const payment = await paymentResponse.json().catch(() => ({}));
-    if (!paymentResponse.ok) {
-      console.error('Error consultando pago en Mercado Pago:', 'status=' + String(paymentResponse.status));
-      return res.status(502).json({ error: 'No se pudo consultar el pago.' });
-    }
-"""
-          new="""    let payment;
-    try {
-      payment = await getPayment(dataId);
-    } catch (error) {
-      if (error?.code === 'MP_NOT_CONFIGURED') {
-        return res.status(500).json({ error: 'Falta configurar MERCADOPAGO_ACCESS_TOKEN.' });
-      }
-      console.error(
-        'Error consultando pago en Mercado Pago:',
-        'code=' + String(error?.code || 'MP_PAYMENT_LOOKUP_FAILED'),
-        'status=' + String(error?.providerStatus || 'unknown')
-      );
-      return res.status(502).json({ error: 'No se pudo consultar el pago.' });
-    }
-"""
-          if old not in s: raise SystemExit('payment fetch block not found')
-          p.write_text(s.replace(old,new,1))
-          PY
-      - name: Validate syntax and full regression suite
-        run: |
+      - run: python3 scripts/apply-mp-webhook-timeout-temp.py
+      - run: |
           node --check api/webhook-mercadopago.js
           node --check lib/payments.js
           npm install --ignore-scripts --no-audit --no-fund
           npm test
-      - name: Remove temporary workflow and commit
-        run: |
+      - run: |
           rm .github/workflows/apply-mp-webhook-timeout-temp.yml
+          rm scripts/apply-mp-webhook-timeout-temp.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add api/webhook-mercadopago.js .github/workflows/apply-mp-webhook-timeout-temp.yml
+          git add api/webhook-mercadopago.js .github/workflows/apply-mp-webhook-timeout-temp.yml scripts/apply-mp-webhook-timeout-temp.py
           git commit -m "Bound Mercado Pago webhook payment lookup"
           git push origin HEAD:fix/mercadopago-webhook-timeout-20260908
