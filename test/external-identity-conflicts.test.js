@@ -92,6 +92,33 @@ test('reconciliación tardía no escribe sobre un pedido que dejó de estar pend
   assert.equal(call, 3);
 });
 
+test('checkout no sobrescribe un preference_id distinto ya ligado al mismo pedido', async () => {
+  let call = 0;
+  const sql = async (strings) => {
+    call += 1;
+    const text = strings.join('?');
+    if (call === 1) {
+      assert.match(text, /SELECT id FROM orders/);
+      return [];
+    }
+    if (call === 2) {
+      assert.match(text, /preference_id IS NULL OR preference_id=/);
+      return [];
+    }
+    assert.match(text, /SELECT id,preference_id FROM orders/);
+    return [{ id: 77, preference_id: 'pref-original' }];
+  };
+
+  const result = await persistPreferenceIdentity(sql, {
+    orderId: 77,
+    preferenceId: 'pref-new',
+    paymentUrl: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-new'
+  });
+
+  assert.deepEqual(result, { ok: false, conflictOrderId: null, skipped: true });
+  assert.equal(call, 3);
+});
+
 test('checkout retiene la reserva ante conflicto de preference_id', () => {
   const checkout = read('api/crear-preferencia-carrito.js');
   assert.match(checkout, /persistPreferenceIdentity/);
