@@ -28,7 +28,7 @@ test('persistencia de preference_id detecta owner previo sin mutar el pedido', a
     paymentUrl: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-conflict'
   });
 
-  assert.deepEqual(result, { ok: false, conflictOrderId: 91 });
+  assert.deepEqual(result, { ok: false, conflictOrderId: 91, skipped: false });
   assert.equal(calls, 1);
 });
 
@@ -57,7 +57,38 @@ test('carrera UNIQUE de preference_id se convierte en conflicto controlado', asy
     paymentUrl: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-race'
   });
 
-  assert.deepEqual(result, { ok: false, conflictOrderId: 92 });
+  assert.deepEqual(result, { ok: false, conflictOrderId: 92, skipped: false });
+  assert.equal(call, 3);
+});
+
+test('reconciliación tardía no escribe sobre un pedido que dejó de estar pendiente', async () => {
+  let call = 0;
+  const sql = async (strings) => {
+    call += 1;
+    const text = strings.join('?');
+    if (call === 1) {
+      assert.match(text, /SELECT id FROM orders/);
+      return [];
+    }
+    if (call === 2) {
+      assert.match(text, /status='pending'/);
+      assert.match(text, /payment_id IS NULL/);
+      assert.match(text, /payment_url IS NULL/);
+      assert.match(text, /preference_id IS NULL/);
+      return [];
+    }
+    assert.match(text, /SELECT id,preference_id FROM orders/);
+    return [{ id: 77, preference_id: null }];
+  };
+
+  const result = await persistPreferenceIdentity(sql, {
+    orderId: 77,
+    preferenceId: 'pref-late',
+    paymentUrl: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=pref-late',
+    pendingUnlinkedOnly: true
+  });
+
+  assert.deepEqual(result, { ok: false, conflictOrderId: null, skipped: true });
   assert.equal(call, 3);
 });
 
@@ -70,9 +101,11 @@ test('checkout retiene la reserva ante conflicto de preference_id', () => {
   assert.doesNotMatch(checkout, /preference_ownership_conflict[\s\S]{0,800}releaseReservedStock/);
 });
 
-test('cron reconcilia preference_id sin saltarse la protección UNIQUE', () => {
+test('cron reconcilia preference_id sin saltarse la protección UNIQUE ni la carrera de estado', () => {
   const envios = read('api/envios.js');
   assert.match(envios, /persistPreferenceIdentity/);
+  assert.match(envios, /pendingUnlinkedOnly:\s*true/);
+  assert.match(envios, /if \(recovered\.skipped\) continue/);
   assert.match(envios, /payment\.preference_ownership_conflict/);
   assert.match(envios, /payment_status_detail='preference_ownership_conflict'/);
   assert.doesNotMatch(envios, /UPDATE orders SET preference_id=\$\{preference\.id\}/);
