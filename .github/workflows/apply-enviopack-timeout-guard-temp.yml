@@ -1,0 +1,40 @@
+name: Apply Enviopack ambiguous timeout guard
+
+on:
+  push:
+    branches:
+      - fix/enviopack-ambiguous-shipment-timeout-20260908
+    paths:
+      - .github/workflows/apply-enviopack-timeout-guard-temp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/enviopack-ambiguous-shipment-timeout-20260908
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Apply patch
+        run: python3 .github/patch_enviopack_timeout_guard.py
+      - name: Validate syntax and tests
+        run: |
+          node --check lib/shipping.js
+          node --check api/admin.js
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+      - name: Remove temporary files and commit
+        run: |
+          rm .github/patch_enviopack_timeout_guard.py
+          rm .github/workflows/apply-enviopack-timeout-guard-temp.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/shipping.js api/admin.js admin.html test/shipment-timeout-reconciliation.test.js .github/patch_enviopack_timeout_guard.py .github/workflows/apply-enviopack-timeout-guard-temp.yml
+          git commit -m "Guard ambiguous Enviopack shipment creation timeouts"
+          git push origin HEAD:fix/enviopack-ambiguous-shipment-timeout-20260908
