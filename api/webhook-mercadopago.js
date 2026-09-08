@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const { releaseReservedStockIfUnshipped } = require('../lib/inventory');
-const { orderStatusFromPayment } = require('../lib/order-state');
+const { orderStatusFromPayment, isLateApprovalConflict } = require('../lib/order-state');
 const { queueAndSendOrderNotification } = require('../lib/notifications');
 
 function parseSignatureHeader(value) {
@@ -70,7 +70,8 @@ module.exports = async (req, res) => {
     if (process.env.DATABASE_URL && payment.external_reference) {
       const sql = getDb();
       const rows = await sql`
-        SELECT id,status,customer_id,quantity,product_id,total_amount,currency
+        SELECT id,status,customer_id,quantity,product_id,total_amount,currency,
+               payment_id,payment_status,payment_status_detail
         FROM orders WHERE external_reference=${payment.external_reference} LIMIT 1
       `;
 
@@ -154,6 +155,48 @@ module.exports = async (req, res) => {
           `;
           console.error('Mercado Pago payment validation failed:', 'order_id=' + String(order.id));
           return res.status(200).json({ received: true, payment_id: payment.id, status: payment.status, validation_failed: true });
+        }
+
+        if (isLateApprovalConflict(oldStatus, payment.status)) {
+          const alreadyMarked = order.payment_status === 'approved'
+            && order.payment_status_detail === 'late_approval_conflict'
+            && String(order.payment_id || '') === paymentId;
+
+          await sql`
+            UPDATE orders SET
+              customer_id=${customerId},payment_id=${paymentId},payment_status='approved',
+              payment_status_detail='late_approval_conflict',status=${oldStatus},updated_at=NOW()
+            WHERE id=${order.id}
+          `;
+
+          if (!alreadyMarked) {
+            await sql`
+              INSERT INTO order_events(order_id,event_type,old_status,new_status,payload)
+              VALUES(
+                ${order.id},'payment.late_approval_conflict',${oldStatus},${oldStatus},
+                ${JSON.stringify({
+                  payment_id: paymentId,
+                  provider_status: payment.status,
+                  provider_status_detail: payment.status_detail || null,
+                  transaction_amount: payment.transaction_amount,
+                  currency_id: payment.currency_id || null,
+                  reason: 'approved_after_terminal_order'
+                })}::jsonb
+              )
+            `;
+            console.error(
+              'Mercado Pago late approval conflict:',
+              'code=LATE_PAYMENT_APPROVAL_CONFLICT',
+              'order_id=' + String(order.id)
+            );
+          }
+
+          return res.status(200).json({
+            received: true,
+            payment_id: payment.id,
+            status: payment.status,
+            late_approval_conflict: true
+          });
         }
 
         const newStatus = orderStatusFromPayment(oldStatus, payment.status);
