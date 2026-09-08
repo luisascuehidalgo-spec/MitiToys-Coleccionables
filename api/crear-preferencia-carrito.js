@@ -8,6 +8,7 @@ const {
 } = require('../lib/shipping');
 const { reserveStock, releaseReservedStock } = require('../lib/inventory');
 const { PUBLIC_BASE_URL, preferenceWindow, createPreferenceWithReconciliation } = require('../lib/payments');
+const { persistPreferenceIdentity } = require('../lib/external-identities');
 
 const clean = (value, max = 200) => String(value || '').trim().slice(0, max);
 const PRODUCTOS = {
@@ -215,7 +216,19 @@ module.exports = async (req, res) => {
       });
     }
 
-    await sql`UPDATE orders SET preference_id=${mercadoPago.id},payment_url=${mercadoPago.init_point},payment_status_detail=NULL,updated_at=NOW() WHERE id=${orderId}`;
+    const preferenceIdentity = await persistPreferenceIdentity(sql, { orderId, preferenceId: mercadoPago.id, paymentUrl: mercadoPago.init_point });
+if (!preferenceIdentity.ok) {
+  await sql`UPDATE orders SET payment_status_detail='preference_ownership_conflict',updated_at=NOW() WHERE id=${orderId}`;
+  await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${orderId},'payment.preference_ownership_conflict','pending',${JSON.stringify({ preference_id: mercadoPago.id, conflict_order_id: preferenceIdentity.conflictOrderId || null })}::jsonb)`;
+  return res.status(202).json({
+    init_point: `${origin}/pedido.html?pedido=${encodeURIComponent(orderNumber)}&pago=verificando`,
+    pending_confirmation: true,
+    order_number: orderNumber,
+    subtotal,
+    shipping_amount: shippingAmount,
+    total
+  });
+}
     await sql`
       INSERT INTO order_events(order_id,event_type,new_status,payload)
       VALUES(${orderId},'order.created','pending',${JSON.stringify({
