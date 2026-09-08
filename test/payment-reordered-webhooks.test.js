@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { paymentIdentityDecision } = require('../lib/payment-reconciliation');
-const { hasPaymentConflict, orderStatusFromShipping, adminStatusError, adminStatusOptions } = require('../lib/order-state');
+const { hasPaymentConflict, requiresPaymentReview, orderStatusFromShipping, adminStatusError, adminStatusOptions } = require('../lib/order-state');
 
 const webhook = fs.readFileSync(path.join(__dirname, '..', 'api', 'webhook-mercadopago.js'), 'utf8');
 const adminApi = fs.readFileSync(path.join(__dirname, '..', 'api', 'admin.js'), 'utf8');
@@ -74,7 +74,7 @@ test('eventos secundarios se deduplican por payment_id y estado', () => {
   assert.match(webhook, /event_type='payment\.multiple_approved_conflict'[\s\S]*payload->>'payment_id'=\$\{paymentId\}/);
 });
 
-test('multiple_approved_conflict bloquea fulfillment aunque payment_status siga approved', () => {
+test('multiple_approved_conflict sigue bloqueando fulfillment bajo la regla general de revisión', () => {
   const conflictOrder = {
     status: 'approved',
     payment_id: 'canonical',
@@ -82,6 +82,7 @@ test('multiple_approved_conflict bloquea fulfillment aunque payment_status siga 
     payment_status_detail: 'multiple_approved_conflict'
   };
   assert.equal(hasPaymentConflict(conflictOrder), true);
+  assert.equal(requiresPaymentReview(conflictOrder), true);
   assert.equal(orderStatusFromShipping(conflictOrder, 'processing'), 'approved');
   assert.match(
     adminStatusError({
@@ -91,23 +92,25 @@ test('multiple_approved_conflict bloquea fulfillment aunque payment_status siga 
       paymentStatus: 'approved',
       paymentStatusDetail: 'multiple_approved_conflict'
     }),
-    /conflicto entre pagos aprobados/i
+    /revisión manual/i
   );
   assert.deepEqual(adminStatusOptions(conflictOrder), ['approved']);
 });
 
-test('backend de Enviopack revalida el conflicto antes de crear un shipment', () => {
-  assert.match(adminApi, /hasPaymentConflict\(order\)[\s\S]*PAYMENT_CONFLICT_REQUIRES_REVIEW/);
-  assert.match(adminApi, /payment_status='approved' AND COALESCE\(payment_status_detail,''\)<>'multiple_approved_conflict'/);
+test('backend de Enviopack revalida múltiples aprobados dentro del guard unificado de revisión', () => {
+  assert.match(adminApi, /requiresPaymentReview\(order\)[\s\S]*PAYMENT_REQUIRES_REVIEW/);
+  assert.match(adminApi, /COALESCE\(payment_status_detail,''\) NOT IN \('multiple_approved_conflict','partially_refunded'\)/);
   assert.match(adminApi, /const firstPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail/);
   assert.match(adminApi, /const secondPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail/);
   assert.match(adminApi, /const finalPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail/);
-  assert.match(adminApi, /hasPaymentConflict\(finalPaymentGuard\[0\]\)/);
+  assert.match(adminApi, /requiresPaymentReview\(firstPaymentGuard\[0\]\)/);
+  assert.match(adminApi, /requiresPaymentReview\(secondPaymentGuard\[0\]\)/);
+  assert.match(adminApi, /requiresPaymentReview\(finalPaymentGuard\[0\]\)/);
   assert.match(adminApi, /paymentStatusDetail:previous\.payment_status_detail/);
 });
 
-test('panel muestra alerta y oculta acciones operativas para múltiples pagos aprobados', () => {
+test('panel conserva alerta y bloqueo de múltiples pagos aprobados dentro del guard unificado', () => {
   assert.match(adminUi, /MÚLTIPLES PAGOS APROBADOS · BLOQUEADO HASTA REVISIÓN EN MERCADO PAGO/);
-  assert.match(adminUi, /if\(o\.payment_status_detail==='multiple_approved_conflict'\)return\[current\]/);
-  assert.match(adminUi, /o\.payment_status==='approved'&&o\.payment_status_detail!=='multiple_approved_conflict'/);
+  assert.match(adminUi, /\['multiple_approved_conflict','partially_refunded'\]\.includes\(o\.payment_status_detail\)\)return\[current\]/);
+  assert.match(adminUi, /o\.payment_status==='approved'&&!\['multiple_approved_conflict','partially_refunded'\]\.includes\(o\.payment_status_detail\)/);
 });
