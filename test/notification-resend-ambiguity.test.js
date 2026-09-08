@@ -31,6 +31,9 @@ function notificationSql({ failSentPersistence = false } = {}) {
       return [{
         id: 77,
         order_number: 'MT-77',
+        status: 'approved',
+        payment_status: 'approved',
+        payment_status_detail: null,
         customer_name: 'Cliente Test',
         customer_email: 'cliente@example.com'
       }];
