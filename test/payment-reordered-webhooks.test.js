@@ -8,6 +8,7 @@ const { hasPaymentConflict, orderStatusFromShipping, adminStatusError, adminStat
 
 const webhook = fs.readFileSync(path.join(__dirname, '..', 'api', 'webhook-mercadopago.js'), 'utf8');
 const adminApi = fs.readFileSync(path.join(__dirname, '..', 'api', 'admin.js'), 'utf8');
+const adminUi = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
 
 test('mismo payment_id o primer payment_id se procesa normalmente', () => {
   assert.equal(paymentIdentityDecision({ payment_id: null, payment_status: 'pending' }, { id: 'p1', status: 'pending' }), 'process');
@@ -103,4 +104,10 @@ test('backend de Enviopack revalida el conflicto antes de crear un shipment', ()
   assert.match(adminApi, /const finalPaymentGuard = await sql`SELECT status,payment_status,payment_status_detail/);
   assert.match(adminApi, /hasPaymentConflict\(finalPaymentGuard\[0\]\)/);
   assert.match(adminApi, /paymentStatusDetail:previous\.payment_status_detail/);
+});
+
+test('panel muestra alerta y oculta acciones operativas para múltiples pagos aprobados', () => {
+  assert.match(adminUi, /MÚLTIPLES PAGOS APROBADOS · BLOQUEADO HASTA REVISIÓN EN MERCADO PAGO/);
+  assert.match(adminUi, /if\(o\.payment_status_detail==='multiple_approved_conflict'\)return\[current\]/);
+  assert.match(adminUi, /o\.payment_status==='approved'&&o\.payment_status_detail!=='multiple_approved_conflict'/);
 });
