@@ -2,6 +2,29 @@ const { getDb } = require('../lib/db');
 const { ensureReviewInvites } = require('../lib/notifications');
 const { searchParams } = require('../lib/request-url');
 const { publicOrderStatus } = require('../lib/order-state');
+const { PREFERENCE_TTL_MS } = require('../lib/payments');
+
+function safePendingPaymentUrl(order) {
+  if (order?.status !== 'pending' || String(order?.payment_status || 'pending') !== 'pending') return null;
+  if (!order?.payment_url) return null;
+  if (Date.now() - new Date(order.created_at).getTime() >= PREFERENCE_TTL_MS) return null;
+  try {
+    const url = new URL(String(order.payment_url));
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:') return null;
+    if (!(host === 'mercadopago.com' || host.endsWith('.mercadopago.com') || host === 'mercadopago.com.ar' || host.endsWith('.mercadopago.com.ar'))) return null;
+    return url.toString();
+  } catch (_) {
+    return null;
+  }
+}
+
+function publicPaymentDetail(detail) {
+  if (detail === 'preference_uncertain') return 'Estamos verificando el enlace de pago';
+  if (detail === 'preference_not_found') return 'El enlace de pago no pudo confirmarse';
+  if (detail === 'amount_or_currency_mismatch') return 'Pago en revisión';
+  return detail || null;
+}
 
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
@@ -15,7 +38,7 @@ module.exports = async (req, res) => {
     const sql = getDb();
     const rows = await sql`
       SELECT o.id,o.order_number,o.product_title,o.quantity,o.subtotal_amount,o.shipping_amount,o.total_amount,o.currency,
-        o.status,o.payment_status,o.payment_status_detail,o.shipping_status,o.shipping_recipient,o.shipping_city,o.shipping_province,
+        o.status,o.payment_status,o.payment_status_detail,o.preference_id,o.payment_url,o.shipping_status,o.shipping_recipient,o.shipping_city,o.shipping_province,
         o.shipping_carrier,o.shipping_service,o.shipping_estimated_hours,o.tracking_number,o.shipping_destination_type,
         o.shipping_branch_name,o.shipping_branch_address,o.shipping_label_ready,o.created_at,o.updated_at
       FROM orders o JOIN customers c ON c.id=o.customer_id
@@ -25,6 +48,8 @@ module.exports = async (req, res) => {
 
     const order = rows[0];
     order.status = publicOrderStatus(order);
+    order.payment_url = safePendingPaymentUrl(order);
+    order.payment_status_detail = publicPaymentDetail(order.payment_status_detail);
     if (order.status === 'delivered') await ensureReviewInvites(sql, order.id);
     const [items, events, reviewInvites] = await Promise.all([
       sql`SELECT product_id,product_title,quantity,unit_price,total_amount FROM order_items WHERE order_id=${order.id} ORDER BY id`,
@@ -40,7 +65,7 @@ module.exports = async (req, res) => {
       }
     }
     const timeline = events
-      .filter(event => ['order.created','payment.created','payment.updated','payment.validation_failed','checkout.expired','enviopack.shipment_created','enviopack.synced','enviopack.admin_sync','admin.status_changed'].includes(event.event_type))
+      .filter(event => ['order.created','payment.created','payment.updated','payment.validation_failed','payment.preference_uncertain','payment.preference_recovered','payment.preference_expired','checkout.expired','enviopack.shipment_created','enviopack.synced','enviopack.admin_sync','admin.status_changed'].includes(event.event_type))
       .map(event => ({ type: event.event_type, status: event.new_status, date: event.created_at }));
 
     delete order.id;
