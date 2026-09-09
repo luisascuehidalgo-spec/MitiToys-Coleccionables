@@ -96,7 +96,7 @@ module.exports = async (req, res) => {
     }
     return res.status(405).json({ error: 'Método no permitido.' });
   } catch (error) {
-    console.error('admin product error:', error);
+    console.error('admin product error:', 'code=' + String(error?.code || error?.name || 'ADMIN_PRODUCT_FAILED'));
     return res.status(500).json({ error: 'No se pudo guardar el producto.' });
   }
 };
