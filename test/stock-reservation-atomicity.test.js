@@ -2,14 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { reserveStock } = require('../lib/inventory');
+const { reserveStockQuery, reserveStock } = require('../lib/inventory');
 
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('descuento de stock y movimiento reserve ocurren en una sola sentencia SQL', async () => {
   let calls = 0;
-  const sql = async (strings, ...values) => {
+  const sql = (strings, ...values) => {
     calls += 1;
     const text = strings.join('?');
     assert.match(text, /WITH updated_product AS/);
@@ -20,7 +20,7 @@ test('descuento de stock y movimiento reserve ocurren en una sola sentencia SQL'
     assert.match(text, /movement_type,quantity,reason/);
     assert.match(text, /FROM updated_product/);
     assert.doesNotMatch(text, /ON CONFLICT/);
-    return [{ product_id: '1705', quantity: -2 }];
+    return Promise.resolve([{ product_id: '1705', quantity: -2 }]);
   };
 
   assert.deepEqual(
@@ -30,17 +30,34 @@ test('descuento de stock y movimiento reserve ocurren en una sola sentencia SQL'
   assert.equal(calls, 1);
 });
 
+test('reserveStockQuery devuelve la sentencia sin ejecutarla para incluirla en una transacción', async () => {
+  let executed = false;
+  const query = Promise.resolve([{ product_id: '1705', quantity: -2 }]);
+  const sql = (strings) => {
+    const text = strings.join('?');
+    assert.match(text, /WITH updated_product AS/);
+    return query;
+  };
+  const built = reserveStockQuery(sql, { productId: '1705', orderId: 77, quantity: 2 });
+  assert.equal(built, query);
+  assert.equal(executed, false);
+});
+
 test('si no hay stock suficiente no se registra reserva', async () => {
-  const sql = async () => [];
+  const sql = () => Promise.resolve([]);
   assert.deepEqual(
     await reserveStock(sql, { productId: '1705', orderId: 77, quantity: 99 }),
     []
   );
 });
 
-test('checkout usa reserveStock y no separa descuento de movimiento de inventario', () => {
+test('checkout usa persistencia transaccional y no separa descuento de movimiento de inventario', () => {
   const checkout = read('api/crear-preferencia-carrito.js');
-  assert.match(checkout, /reserveStock/);
+  const persistence = read('lib/checkout-persistence.js');
+  assert.match(checkout, /persistCheckoutLocal/);
+  assert.match(persistence, /reserveStockQuery/);
+  assert.match(persistence, /sql\.transaction/);
+  assert.doesNotMatch(checkout, /reserveStock\(sql/);
   assert.doesNotMatch(checkout, /UPDATE products SET stock_quantity=stock_quantity-\$\{item\.qty\}/);
   assert.doesNotMatch(checkout, /INSERT INTO inventory_movements\(product_id,order_id,movement_type,quantity,reason\) VALUES\(\$\{item\.id\},\$\{orderId\},'reserve'/);
 });

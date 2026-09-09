@@ -6,7 +6,7 @@ const {
   normalizeCart,
   cartHash
 } = require('../lib/shipping');
-const { reserveStock, releaseReservedStock } = require('../lib/inventory');
+const { allocateOrderId, persistCheckoutLocal, cleanupCheckoutLocal } = require('../lib/checkout-persistence');
 const { PUBLIC_BASE_URL, preferenceWindow, createPreferenceWithReconciliation } = require('../lib/payments');
 const { persistPreferenceIdentity } = require('../lib/external-identities');
 
@@ -23,6 +23,7 @@ module.exports = async (req, res) => {
   let sql = null;
   let orderId = null;
   let shippingQuoteId = null;
+  let localCheckoutPersisted = false;
   const reserved = [];
 
   try {
@@ -62,7 +63,6 @@ module.exports = async (req, res) => {
     }
 
     const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
-    const units = items.reduce((sum, item) => sum + item.qty, 0);
     const postalCode = normalizePostalCode(customer.postal_code);
     const provinceCode = normalizeProvinceCode(customer.province_code);
     let shipping = null;
@@ -118,50 +118,32 @@ module.exports = async (req, res) => {
       RETURNING id
     `;
     const customerId = customerRows[0].id;
-    const first = items[0];
-    const temporaryReference = `MITITOYS-PENDING-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const orderRows = await sql`
-      INSERT INTO orders(
-        order_number,customer_id,product_id,product_title,quantity,unit_price,
-        subtotal_amount,shipping_amount,total_amount,external_reference,
-        shipping_recipient,shipping_address,shipping_city,shipping_postal_code,
-        shipping_province,shipping_phone,shipping_notes,shipping_provider,
-        shipping_carrier_id,shipping_carrier,shipping_service,
-        shipping_estimated_hours,shipping_quote_id,shipping_destination_type,
-        shipping_locality_id,shipping_street,shipping_number,shipping_floor,shipping_unit,
-        shipping_branch_id,shipping_branch_name,shipping_branch_address
-      ) VALUES(
-        'MT-'||TO_CHAR(NOW(),'YYYYMMDDHH24MISSMS')||'-'||SUBSTRING(MD5(RANDOM()::text),1,6),
-        ${customerId},${first.id},${summary},${units},${first.price},
-        ${subtotal},${shippingAmount},${total},${temporaryReference},
-        ${clean(customer.name, 160) || 'Cliente'},${deliveryAddress || null},${deliveryCity || null},${finalPostalCode},
-        ${provinceName},${clean(customer.phone, 50) || null},${clean(customer.notes, 1000) || null},${shipping?.provider || null},
-        ${shipping?.carrier_id || null},${shipping?.carrier_name || null},${shipping?.service_name || null},
-        ${shipping?.estimated_hours || null},${shippingQuoteId || null},${shipping?.destination_type || 'home'},
-        ${shipping?.destination_locality_id || null},${street || null},${streetNumber || null},${floor || null},${unit || null},
-        ${shipping?.branch_id || null},${shipping?.branch_name || null},${shipping?.branch_address || null}
-      ) RETURNING id,order_number
-    `;
-    orderId = orderRows[0].id;
-    const orderNumber = orderRows[0].order_number;
-    const externalReference = `MITITOYS-ORDER-${orderId}`;
-    await sql`UPDATE orders SET external_reference=${externalReference} WHERE id=${orderId}`;
 
-    if (shippingQuoteId) {
-      const claimed = await sql`UPDATE shipping_quotes SET used_at=NOW(),order_id=${orderId} WHERE id=${shippingQuoteId} AND used_at IS NULL AND expires_at>NOW() RETURNING id`;
-      if (!claimed.length) throw Object.assign(new Error('La cotización ya fue utilizada o venció.'), { code: 'SHIPPING_QUOTE_EXPIRED' });
-    }
-
-    for (const item of items) {
-      await sql`INSERT INTO order_items(order_id,product_id,product_title,quantity,unit_price,total_amount) VALUES(${orderId},${item.id},${item.title},${item.qty},${item.price},${item.price * item.qty})`;
-    }
-
-    for (const item of items) {
-      if (!item.stockManaged) continue;
-      const reservation = await reserveStock(sql, { productId: item.id, orderId, quantity: item.qty });
-      if (!reservation.length) throw new Error(`Sin stock disponible para ${item.title}.`);
-      reserved.push(item);
-    }
+    orderId = await allocateOrderId(sql);
+    const localCheckout = await persistCheckoutLocal(sql, {
+      orderId,
+      customerId,
+      items,
+      subtotal,
+      shippingAmount,
+      total,
+      shippingQuoteId,
+      shipping,
+      customer,
+      provinceName,
+      finalPostalCode,
+      street,
+      streetNumber,
+      floor,
+      unit,
+      deliveryAddress,
+      deliveryCity,
+      summary
+    });
+    localCheckoutPersisted = true;
+    const orderNumber = localCheckout.orderNumber;
+    const externalReference = localCheckout.externalReference;
+    reserved.push(...localCheckout.reserved);
 
     const preferenceItems = items.map(item => ({
       id: item.id,
@@ -217,18 +199,18 @@ module.exports = async (req, res) => {
     }
 
     const preferenceIdentity = await persistPreferenceIdentity(sql, { orderId, preferenceId: mercadoPago.id, paymentUrl: mercadoPago.init_point });
-if (!preferenceIdentity.ok) {
-  await sql`UPDATE orders SET payment_status_detail='preference_ownership_conflict',updated_at=NOW() WHERE id=${orderId}`;
-  await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${orderId},'payment.preference_ownership_conflict','pending',${JSON.stringify({ preference_id: mercadoPago.id, conflict_order_id: preferenceIdentity.conflictOrderId || null })}::jsonb)`;
-  return res.status(202).json({
-    init_point: `${origin}/pedido.html?pedido=${encodeURIComponent(orderNumber)}&pago=verificando`,
-    pending_confirmation: true,
-    order_number: orderNumber,
-    subtotal,
-    shipping_amount: shippingAmount,
-    total
-  });
-}
+    if (!preferenceIdentity.ok) {
+      await sql`UPDATE orders SET payment_status_detail='preference_ownership_conflict',updated_at=NOW() WHERE id=${orderId}`;
+      await sql`INSERT INTO order_events(order_id,event_type,new_status,payload) VALUES(${orderId},'payment.preference_ownership_conflict','pending',${JSON.stringify({ preference_id: mercadoPago.id, conflict_order_id: preferenceIdentity.conflictOrderId || null })}::jsonb)`;
+      return res.status(202).json({
+        init_point: `${origin}/pedido.html?pedido=${encodeURIComponent(orderNumber)}&pago=verificando`,
+        pending_confirmation: true,
+        order_number: orderNumber,
+        subtotal,
+        shipping_amount: shippingAmount,
+        total
+      });
+    }
     await sql`
       INSERT INTO order_events(order_id,event_type,new_status,payload)
       VALUES(${orderId},'order.created','pending',${JSON.stringify({
@@ -244,15 +226,22 @@ if (!preferenceIdentity.ok) {
     return res.status(200).json({ init_point: mercadoPago.init_point, preference_id: mercadoPago.id, order_number: orderNumber, subtotal, shipping_amount: shippingAmount, total });
   } catch (error) {
     console.error('crear-preferencia-carrito error:', 'code=' + String(error?.code || error?.name || 'CHECKOUT_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));
-    if (sql && orderId) {
-      try { await sql`UPDATE orders SET status='cancelled',updated_at=NOW() WHERE id=${orderId}`; } catch (_) {}
-      try { await releaseReservedStock(sql, orderId, 'Liberación por error al crear el pago'); } catch (_) {}
-      if (shippingQuoteId) {
-        try { await sql`UPDATE shipping_quotes SET used_at=NULL,order_id=NULL WHERE id=${shippingQuoteId} AND order_id=${orderId}`; } catch (_) {}
+    if (sql && orderId && localCheckoutPersisted) {
+      try {
+        const cleanup = await cleanupCheckoutLocal(sql, { orderId });
+        if (!cleanup.cleaned) console.warn('checkout cleanup skipped:', 'code=CHECKOUT_CLEANUP_STATE_CHANGED');
+      } catch (cleanupError) {
+        console.warn('checkout cleanup failed:', 'code=' + String(cleanupError?.code || cleanupError?.name || 'CHECKOUT_CLEANUP_FAILED'));
       }
     }
     if (String(error?.message || '').startsWith('Sin stock disponible')) return res.status(409).json({ error: error.message });
     if (error?.code === 'SHIPPING_QUOTE_EXPIRED') return res.status(409).json({ code: error.code, error: error.message });
+    if (error?.code === 'CHECKOUT_LOCAL_INTEGRITY_FAILED') {
+      return res.status(409).json({
+        code: error.code,
+        error: 'El stock o la cotización cambiaron mientras confirmábamos el pedido. Revisá el carrito y calculá el envío nuevamente.'
+      });
+    }
     return res.status(500).json({ error: 'No se pudo crear el pago.' });
   }
 };
