@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const ADMIN_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const ADMIN_SESSION_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const ADMIN_SESSION_MAX_AGE_SECONDS = Math.floor(ADMIN_SESSION_TTL_MS / 1000);
+const ADMIN_MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function sign(value, secret = process.env.ADMIN_SESSION_SECRET) {
   const key = String(secret || '');
@@ -52,7 +53,55 @@ function verifySessionToken(token, secret, now = Date.now()) {
   }
 }
 
+function firstHeader(value) {
+  return String(value ?? '').split(',')[0].trim();
+}
+
+function isLocalHost(host) {
+  const normalized = String(host || '').toLowerCase();
+  return normalized === 'localhost' || normalized.startsWith('localhost:')
+    || normalized === '127.0.0.1' || normalized.startsWith('127.0.0.1:')
+    || normalized === '[::1]' || normalized.startsWith('[::1]:');
+}
+
+function verifyMutationOrigin(req) {
+  const method = String(req?.method || '').toUpperCase();
+  if (!ADMIN_MUTATING_METHODS.has(method)) return true;
+
+  const headers = req?.headers || {};
+  const fetchSite = String(headers['sec-fetch-site'] || '').trim().toLowerCase();
+  if (fetchSite && fetchSite !== 'same-origin') return false;
+
+  const rawOrigin = String(headers.origin || '').trim();
+  if (!rawOrigin) {
+    // Modern browsers send Origin on same-origin mutating fetches. When neither
+    // browser metadata header is present, preserve compatibility for non-browser
+    // tooling while SameSite=Strict remains the baseline cookie protection.
+    return !fetchSite || fetchSite === 'same-origin';
+  }
+  if (rawOrigin === 'null') return false;
+
+  let origin;
+  try {
+    origin = new URL(rawOrigin);
+  } catch (_) {
+    return false;
+  }
+
+  const host = firstHeader(headers.host).toLowerCase();
+  if (!host || origin.host.toLowerCase() !== host) return false;
+
+  const forwardedProto = firstHeader(headers['x-forwarded-proto']).toLowerCase();
+  if (forwardedProto) return origin.protocol === `${forwardedProto}:`;
+  if (isLocalHost(host)) return origin.protocol === 'http:' || origin.protocol === 'https:';
+  return origin.protocol === 'https:';
+}
+
 module.exports = async (req, res) => {
+  if (ADMIN_MUTATING_METHODS.has(String(req.method || '').toUpperCase()) && !verifyMutationOrigin(req)) {
+    return res.status(403).json({ error: 'Origen de administración no permitido.' });
+  }
+
   if (req.method === 'POST') {
     const configured = String(process.env.ADMIN_PASSWORD || '');
     const secret = String(process.env.ADMIN_SESSION_SECRET || '');
@@ -85,6 +134,7 @@ module.exports = async (req, res) => {
 };
 
 module.exports.verify = function verify(req) {
+  if (!verifyMutationOrigin(req)) return false;
   const secret = String(process.env.ADMIN_SESSION_SECRET || '');
   if (!secret) return false;
   const header = String(req.headers?.cookie || '');
@@ -94,6 +144,7 @@ module.exports.verify = function verify(req) {
 
 module.exports.createSessionToken = createSessionToken;
 module.exports.verifySessionToken = verifySessionToken;
+module.exports.verifyMutationOrigin = verifyMutationOrigin;
 module.exports.safeEqual = safeEqual;
 module.exports.ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_MS;
 module.exports.ADMIN_SESSION_FUTURE_SKEW_MS = ADMIN_SESSION_FUTURE_SKEW_MS;
