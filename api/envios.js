@@ -50,6 +50,17 @@ async function syncProviderShipment(sql, shipmentId, loadTracking = true) {
     return { details, tracking, trackingNumber, state: persisted.current || null, labelReady, stale: true };
   }
 
+  if (persisted.unchanged) {
+    return {
+      details,
+      tracking,
+      trackingNumber,
+      state: { order: persisted.order.status, shipping: persisted.order.shipping_status },
+      labelReady,
+      unchanged: true
+    };
+  }
+
   await sql`INSERT INTO order_events(order_id,event_type,old_status,new_status,payload) VALUES(${orders[0].id},'enviopack.synced',${persisted.before.status},${persisted.order.status},${JSON.stringify({ shipment_id: String(shipmentId), provider_state: providerState, tracking_number: trackingNumber, tracking })}::jsonb)`;
   if (trackingNumber && trackingNumber !== persisted.before.tracking_number && persisted.order.payment_status === 'approved' && !requiresPaymentReview(persisted.order)) {
     await queueAndSendOrderNotification(sql, orders[0].id, 'shipment_created');
