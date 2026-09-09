@@ -57,7 +57,7 @@ module.exports = async (req, res) => {
     const [items, events, reviewInvites] = await Promise.all([
       sql`SELECT product_id,product_title,quantity,unit_price,total_amount FROM order_items WHERE order_id=${order.id} ORDER BY id`,
       sql`SELECT event_type,new_status,payload,created_at FROM order_events WHERE order_id=${order.id} ORDER BY created_at,id`,
-      sql`SELECT r.product_id,r.review_token,r.status,p.title AS product_title FROM reviews r JOIN products p ON p.id=r.product_id WHERE r.order_id=${order.id} ORDER BY r.id`
+      sql`SELECT r.product_id,r.review_token,r.status,p.title AS product_title FROM reviews r JOIN products p ON p.id=r.product_id WHERE r.order_id=${order.id} AND r.status='invited' AND r.submitted_at IS NULL ORDER BY r.id`
     ]);
     const providerTracking = [];
     for (const event of events) {
@@ -75,7 +75,7 @@ module.exports = async (req, res) => {
     order.items = items;
     order.timeline = timeline;
     order.tracking_events = providerTracking.map(({ key, ...entry }) => entry);
-    order.review_links = order.status === 'delivered' ? reviewInvites.map(review => ({ product_id: review.product_id, product_title: review.product_title, status: review.status, url: '/opinar.html?token=' + encodeURIComponent(review.review_token) })) : [];
+    order.review_links = order.status === 'delivered' ? reviewInvites.map(review => ({ product_id: review.product_id, product_title: review.product_title, status: review.status, url: '/opinar.html#token=' + encodeURIComponent(review.review_token) })) : [];
     return res.status(200).json({ order });
   } catch (error) {
     console.error('estado-pedido error:', 'code=' + String(error?.code || error?.name || 'ORDER_STATUS_ERROR'), 'status=' + String(error?.status || 'unknown'));
