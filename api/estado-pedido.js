@@ -1,6 +1,5 @@
 const { getDb } = require('../lib/db');
 const { ensureReviewInvites } = require('../lib/notifications');
-const { searchParams } = require('../lib/request-url');
 const { publicOrderStatus } = require('../lib/order-state');
 const { PREFERENCE_TTL_MS } = require('../lib/payments');
 
@@ -27,18 +26,22 @@ function publicPaymentDetail(detail) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
+  const contentType = String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (contentType !== 'application/json') return res.status(415).json({ error: 'Formato de consulta no permitido.' });
+
   try {
-    const query = searchParams(req);
-    const number = String(query.get('pedido') || '').trim().slice(0, 80);
-    const email = String(query.get('email') || '').trim().toLowerCase().slice(0, 160);
+    const body = req.body || {};
+    const number = String(body.pedido || '').trim().slice(0, 80);
+    const email = String(body.email || '').trim().toLowerCase().slice(0, 160);
     if (!number) return res.status(400).json({ error: 'Falta el número de pedido.' });
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Ingresá el email utilizado en la compra.' });
 
     const sql = getDb();
     const rows = await sql`
       SELECT o.id,o.order_number,o.product_title,o.quantity,o.subtotal_amount,o.shipping_amount,o.total_amount,o.currency,
-        o.status,o.payment_status,o.payment_status_detail,o.preference_id,o.payment_url,o.shipping_status,o.shipping_recipient,o.shipping_city,o.shipping_province,
+        o.status,o.payment_status,o.payment_status_detail,o.payment_url,o.shipping_status,o.shipping_recipient,o.shipping_city,o.shipping_province,
         o.shipping_carrier,o.shipping_service,o.shipping_estimated_hours,o.tracking_number,o.shipping_destination_type,
         o.shipping_branch_name,o.shipping_branch_address,o.shipping_label_ready,o.created_at,o.updated_at
       FROM orders o JOIN customers c ON c.id=o.customer_id
@@ -73,7 +76,6 @@ module.exports = async (req, res) => {
     order.timeline = timeline;
     order.tracking_events = providerTracking.map(({ key, ...entry }) => entry);
     order.review_links = order.status === 'delivered' ? reviewInvites.map(review => ({ product_id: review.product_id, product_title: review.product_title, status: review.status, url: '/opinar.html?token=' + encodeURIComponent(review.review_token) })) : [];
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json({ order });
   } catch (error) {
     console.error('estado-pedido error:', 'code=' + String(error?.code || error?.name || 'ORDER_STATUS_ERROR'), 'status=' + String(error?.status || 'unknown'));
