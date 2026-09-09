@@ -11,15 +11,8 @@ module.exports = async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(405).send('Método no permitido.');
   try {
     const sql = getDb();
-    // Keep old uploaded photos and include new Cloudinary uploads from the admin.
-    const rows = await sql`SELECT p.id,p.title,i.id AS image_id FROM products p JOIN product_images i ON i.product_id=p.id WHERE p.active=true ORDER BY p.id,i.sort_order,i.id`;
-    const grouped = new Map();
-    for (const row of rows) {
-      const id = String(row.id);
-      if (!grouped.has(id)) grouped.set(id, {id, title:row.title, images:[]});
-      grouped.get(id).images.push('https://mititoys.com/api/product-image?id=' + encodeURIComponent(row.image_id));
-    }
     const cloudProducts = await sql`SELECT id,title,images FROM products WHERE active=true AND jsonb_array_length(images)>0 ORDER BY id`;
+    const grouped = new Map();
     for (const product of cloudProducts) {
       const images = (product.images || []).filter(value => {
         try {
@@ -28,9 +21,7 @@ module.exports = async (req, res) => {
         } catch { return false; }
       });
       if (!images.length) continue;
-      const id = String(product.id);
-      if (!grouped.has(id)) grouped.set(id, { id, title: product.title, images: [] });
-      grouped.get(id).images.push(...images);
+      grouped.set(String(product.id), { id: String(product.id), title: product.title, images });
     }
     const rank = id => priority.includes(id) ? priority.indexOf(id) : priority.length;
     const products = [...grouped.values()].sort((a,b) => rank(a.id)-rank(b.id) || a.title.localeCompare(b.title,'es'));
@@ -46,4 +37,3 @@ module.exports = async (req, res) => {
     return res.status(503).send('No se pudo cargar el catálogo actual. Intentá nuevamente en unos minutos.');
   }
 };
-
