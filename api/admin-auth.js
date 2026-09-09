@@ -1,5 +1,13 @@
 // Mititoys admin authentication
 const crypto = require('crypto');
+const { getDb } = require('../lib/db');
+const {
+  adminLoginRateKey,
+  adminLoginBlocked,
+  recordAdminLoginFailure,
+  clearAdminLoginFailures,
+  ADMIN_LOGIN_LOCK_MINUTES
+} = require('../lib/admin-rate-limit');
 
 const ADMIN_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const ADMIN_SESSION_FUTURE_SKEW_MS = 5 * 60 * 1000;
@@ -97,6 +105,11 @@ function verifyMutationOrigin(req) {
   return origin.protocol === 'https:';
 }
 
+function rateLimited(res) {
+  res.setHeader('Retry-After', String(ADMIN_LOGIN_LOCK_MINUTES * 60));
+  return res.status(429).json({ error: 'Demasiados intentos. Probá nuevamente más tarde.' });
+}
+
 module.exports = async (req, res) => {
   if (ADMIN_MUTATING_METHODS.has(String(req.method || '').toUpperCase()) && !verifyMutationOrigin(req)) {
     return res.status(403).json({ error: 'Origen de administración no permitido.' });
@@ -110,9 +123,32 @@ module.exports = async (req, res) => {
       return res.status(503).json({ error: 'Administración no disponible temporalmente.' });
     }
 
+    const sql = getDb();
+    const rateKey = adminLoginRateKey(req, secret);
+    try {
+      if (await adminLoginBlocked(sql, rateKey)) return rateLimited(res);
+    } catch (error) {
+      console.error('admin auth rate limit error:', 'code=' + String(error?.code || error?.name || 'ADMIN_RATE_LIMIT_ERROR'));
+      return res.status(503).json({ error: 'Administración no disponible temporalmente.' });
+    }
+
     const password = String(req.body?.password || '');
     if (!safeEqual(password, configured)) {
+      try {
+        const failure = await recordAdminLoginFailure(sql, rateKey);
+        if (failure.locked) return rateLimited(res);
+      } catch (error) {
+        console.error('admin auth failure tracking error:', 'code=' + String(error?.code || error?.name || 'ADMIN_RATE_LIMIT_ERROR'));
+        return res.status(503).json({ error: 'Administración no disponible temporalmente.' });
+      }
       return res.status(401).json({ error: 'Contraseña incorrecta.' });
+    }
+
+    try {
+      await clearAdminLoginFailures(sql, rateKey);
+    } catch (error) {
+      console.error('admin auth rate reset error:', 'code=' + String(error?.code || error?.name || 'ADMIN_RATE_LIMIT_ERROR'));
+      return res.status(503).json({ error: 'Administración no disponible temporalmente.' });
     }
 
     const token = createSessionToken(secret);
