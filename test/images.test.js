@@ -152,11 +152,15 @@ test('admin edit sends old URL snapshot and uploads selected image',async()=>{
   assert.ok(edited&&uploaded);assert.equal(get('ps-test').textContent,'Guardado');
 });
 
-test('promotional gallery includes Cloudinary uploads and preserves binary photo URLs',async()=>{
-  query=async s=>s.join('').includes('JOIN product_images')?[{id:'old',title:'Old',image_id:12}]:[{id:'new',title:'New',images:[url,'https://legacy.example/a.jpg']}];
+test('promotional gallery renders only current Cloudinary product images',async()=>{
+  query=async s=>{
+    const sql=s.join('');
+    assert.ok(!sql.includes('product_images'));
+    return [{id:'new',title:'New',images:[url,'https://legacy.example/a.jpg']}];
+  };
   const res={status(code){this.code=code;return this},setHeader(){},send(body){this.body=body;return this}};
   await announcementHandler({method:'GET'},res);
   assert.equal(res.code,200);assert.ok(res.body.includes(url));
-  assert.ok(res.body.includes('/api/product-image?id=12'));
+  assert.ok(!res.body.includes('/api/product-image'));
   assert.ok(!res.body.includes('legacy.example'));
 });
