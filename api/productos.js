@@ -95,7 +95,7 @@ module.exports = async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
     return res.status(200).json({ products: result, reviews });
   } catch (error) {
-    console.error('products api error:', error);
+    console.error('products api error:', 'code=' + String(error?.code || error?.name || 'PRODUCTS_API_FAILED'));
     return res.status(500).json({ error: 'No se pudieron cargar los productos.' });
   }
 };
