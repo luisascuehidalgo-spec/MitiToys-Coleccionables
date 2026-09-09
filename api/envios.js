@@ -226,6 +226,19 @@ async function runAutomation(sql) {
   };
 }
 
+const PUBLIC_SHIPPING_ERRORS = Object.freeze({
+  NO_SHIPPING_RATES: { status: 404, error: 'No hay opciones de envío disponibles para ese destino.' },
+  DESTINATION_MISMATCH: { status: 400, error: 'El código postal no corresponde a la provincia seleccionada.' },
+  SHIPPING_NOT_CONFIGURED: { status: 503, error: 'La cotización automática todavía no está habilitada.' }
+});
+
+function publicShippingError(error) {
+  const code = String(error?.code || '');
+  const known = PUBLIC_SHIPPING_ERRORS[code];
+  if (known) return { status: known.status, body: { code, error: known.error } };
+  return { status: 502, body: { code: 'SHIPPING_ERROR', error: 'No se pudo procesar el envío.' } };
+}
+
 module.exports = async (req, res) => {
   const query = searchParams(req);
   const sql = getDb();
@@ -242,7 +255,7 @@ module.exports = async (req, res) => {
         const provinceCode = normalizeProvinceCode(query.get('province'));
         if (!provinceCode) return res.status(400).json({ error: 'Provincia inválida.' });
         const localities = await listLocalities(provinceCode);
-        res.setHeader('Cache-Control', 'private, max-age=1800');
+        res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=1800, stale-while-revalidate=3600');
         return res.status(200).json({ localities });
       }
 
@@ -317,7 +330,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ delivery_type: deliveryType, province_code: provinceCode, expires_at: expiresAt.toISOString(), options });
   } catch (error) {
     console.error('envios error:', 'code=' + String(error?.code || 'SHIPPING_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));
-    const status = error?.code === 'NO_SHIPPING_RATES' ? 404 : error?.code === 'DESTINATION_MISMATCH' ? 400 : error?.code === 'SHIPPING_NOT_CONFIGURED' ? 503 : 502;
-    return res.status(status).json({ code: error?.code || 'SHIPPING_ERROR', error: error?.message || 'No se pudo procesar el envío.' });
+    const publicError = publicShippingError(error);
+    return res.status(publicError.status).json(publicError.body);
   }
 };
