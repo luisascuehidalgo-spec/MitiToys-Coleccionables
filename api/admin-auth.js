@@ -1,42 +1,100 @@
 // Mititoys admin authentication
 const crypto = require('crypto');
 
-function sign(value) {
-  return crypto.createHmac('sha256', process.env.ADMIN_SESSION_SECRET || '').update(value).digest('hex');
+const ADMIN_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const ADMIN_SESSION_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const ADMIN_SESSION_MAX_AGE_SECONDS = Math.floor(ADMIN_SESSION_TTL_MS / 1000);
+
+function sign(value, secret = process.env.ADMIN_SESSION_SECRET) {
+  const key = String(secret || '');
+  if (!key) return '';
+  return crypto.createHmac('sha256', key).update(value).digest('hex');
+}
+
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left ?? ''), 'utf8');
+  const b = Buffer.from(String(right ?? ''), 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function createSessionToken(secret, now = Date.now()) {
+  const key = String(secret || '');
+  const issuedAt = Number(now);
+  if (!key || !Number.isInteger(issuedAt) || issuedAt < 0) return '';
+  const value = `admin:${issuedAt}`;
+  return Buffer.from(`${value}.${sign(value, key)}`).toString('base64url');
+}
+
+function verifySessionToken(token, secret, now = Date.now()) {
+  const key = String(secret || '');
+  const currentTime = Number(now);
+  if (!key || !token || !Number.isFinite(currentTime)) return false;
+
+  try {
+    const decoded = Buffer.from(String(token), 'base64url').toString('utf8');
+    const dot = decoded.lastIndexOf('.');
+    if (dot < 1) return false;
+
+    const value = decoded.slice(0, dot);
+    const signature = decoded.slice(dot + 1);
+    const match = value.match(/^admin:(\d{1,16})$/);
+    if (!match || !/^[a-f0-9]{64}$/i.test(signature)) return false;
+
+    const issuedAt = Number(match[1]);
+    if (!Number.isInteger(issuedAt) || issuedAt < 0) return false;
+    if (issuedAt > currentTime + ADMIN_SESSION_FUTURE_SKEW_MS) return false;
+    if (currentTime - issuedAt > ADMIN_SESSION_TTL_MS) return false;
+
+    const expected = sign(value, key);
+    return safeEqual(signature, expected);
+  } catch (_) {
+    return false;
+  }
 }
 
 module.exports = async (req, res) => {
   if (req.method === 'POST') {
+    const configured = String(process.env.ADMIN_PASSWORD || '');
+    const secret = String(process.env.ADMIN_SESSION_SECRET || '');
+    if (!configured || !secret) {
+      console.error('admin auth configuration error:', 'code=ADMIN_AUTH_NOT_CONFIGURED');
+      return res.status(503).json({ error: 'Administración no disponible temporalmente.' });
+    }
+
     const password = String(req.body?.password || '');
-    const configured = process.env.ADMIN_PASSWORD;
-    if (!configured || password.length !== configured.length || !crypto.timingSafeEqual(Buffer.from(password), Buffer.from(configured))) {
+    if (!safeEqual(password, configured)) {
       return res.status(401).json({ error: 'Contraseña incorrecta.' });
     }
-    const value = `admin:${Date.now()}`;
-    const token = Buffer.from(`${value}.${sign(value)}`).toString('base64url');
-    res.setHeader('Set-Cookie', `mititoys_admin=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`);
+
+    const token = createSessionToken(secret);
+    if (!token) {
+      console.error('admin auth session error:', 'code=ADMIN_SESSION_CREATE_FAILED');
+      return res.status(503).json({ error: 'Administración no disponible temporalmente.' });
+    }
+
+    res.setHeader('Set-Cookie', `mititoys_admin=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${ADMIN_SESSION_MAX_AGE_SECONDS}`);
     return res.status(200).json({ ok: true });
   }
+
   if (req.method === 'DELETE') {
     res.setHeader('Set-Cookie', 'mititoys_admin=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0');
     return res.status(200).json({ ok: true });
   }
+
   return res.status(405).json({ error: 'Método no permitido' });
 };
 
 module.exports.verify = function verify(req) {
-  const secret = process.env.ADMIN_SESSION_SECRET;
+  const secret = String(process.env.ADMIN_SESSION_SECRET || '');
   if (!secret) return false;
-  const header = String(req.headers.cookie || '');
+  const header = String(req.headers?.cookie || '');
   const match = header.match(/(?:^|; )mititoys_admin=([^;]+)/);
-  if (!match) return false;
-  try {
-    const decoded = Buffer.from(match[1], 'base64url').toString('utf8');
-    const dot = decoded.lastIndexOf('.');
-    if (dot < 1) return false;
-    const value = decoded.slice(0, dot);
-    const sig = decoded.slice(dot + 1);
-    const expected = sign(value);
-    return sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)) && value.startsWith('admin:');
-  } catch (_) { return false; }
+  return Boolean(match && verifySessionToken(match[1], secret));
 };
+
+module.exports.createSessionToken = createSessionToken;
+module.exports.verifySessionToken = verifySessionToken;
+module.exports.safeEqual = safeEqual;
+module.exports.ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_MS;
+module.exports.ADMIN_SESSION_FUTURE_SKEW_MS = ADMIN_SESSION_FUTURE_SKEW_MS;
+module.exports.ADMIN_SESSION_MAX_AGE_SECONDS = ADMIN_SESSION_MAX_AGE_SECONDS;
