@@ -6,8 +6,7 @@ const {
   normalizeCart,
   cartHash
 } = require('../lib/shipping');
-const { releaseReservedStock } = require('../lib/inventory');
-const { allocateOrderId, persistCheckoutLocal } = require('../lib/checkout-persistence');
+const { allocateOrderId, persistCheckoutLocal, cleanupCheckoutLocal } = require('../lib/checkout-persistence');
 const { PUBLIC_BASE_URL, preferenceWindow, createPreferenceWithReconciliation } = require('../lib/payments');
 const { persistPreferenceIdentity } = require('../lib/external-identities');
 
@@ -228,10 +227,11 @@ module.exports = async (req, res) => {
   } catch (error) {
     console.error('crear-preferencia-carrito error:', 'code=' + String(error?.code || error?.name || 'CHECKOUT_ERROR'), 'status=' + String(error?.providerStatus || error?.status || 'unknown'));
     if (sql && orderId && localCheckoutPersisted) {
-      try { await sql`UPDATE orders SET status='cancelled',updated_at=NOW() WHERE id=${orderId}`; } catch (_) {}
-      try { await releaseReservedStock(sql, orderId, 'Liberación por error al crear el pago'); } catch (_) {}
-      if (shippingQuoteId) {
-        try { await sql`UPDATE shipping_quotes SET used_at=NULL,order_id=NULL WHERE id=${shippingQuoteId} AND order_id=${orderId}`; } catch (_) {}
+      try {
+        const cleanup = await cleanupCheckoutLocal(sql, { orderId });
+        if (!cleanup.cleaned) console.warn('checkout cleanup skipped:', 'code=CHECKOUT_CLEANUP_STATE_CHANGED');
+      } catch (cleanupError) {
+        console.warn('checkout cleanup failed:', 'code=' + String(cleanupError?.code || cleanupError?.name || 'CHECKOUT_CLEANUP_FAILED'));
       }
     }
     if (String(error?.message || '').startsWith('Sin stock disponible')) return res.status(409).json({ error: error.message });
