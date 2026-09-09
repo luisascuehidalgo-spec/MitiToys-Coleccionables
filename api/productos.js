@@ -1,12 +1,78 @@
+const crypto = require('crypto');
 const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const clean = (value, max = 500) => String(value || '').trim().slice(0, max);
 const escapeXml = value => String(value ?? '').replace(/[<>&'\"]/g, char => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[char]));
+const validReviewToken = value => /^[a-f0-9]{48}$/i.test(String(value || ''));
 
 module.exports = async (req, res) => {
   const query = searchParams(req);
   const sql = getDb();
   try {
+    if (req.method === 'POST') {
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+      const contentType = String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (contentType !== 'application/json') return res.status(415).json({ error: 'Formato no permitido.' });
+
+      const action = clean(req.body?.action, 40);
+      const token = clean(req.body?.token, 80);
+      if (!validReviewToken(token)) return res.status(404).json({ error: 'Este enlace de opinión no es válido.' });
+
+      if (action === 'review_lookup') {
+        const rows = await sql`
+          SELECT r.product_id,p.title AS product_title,
+            COALESCE((SELECT url FROM jsonb_array_elements_text(p.images) url LIMIT 1),'') AS legacy_image,
+            o.order_number
+          FROM reviews r JOIN products p ON p.id=r.product_id
+          JOIN orders o ON o.id=r.order_id
+          WHERE r.review_token=${token}
+            AND r.status='invited'
+            AND r.submitted_at IS NULL
+            AND o.status='delivered'
+            AND o.payment_status='approved'
+            AND COALESCE(o.payment_status_detail,'') NOT IN ('multiple_approved_conflict','partially_refunded')
+          LIMIT 1
+        `;
+        if (!rows.length) return res.status(404).json({ error: 'Este enlace de opinión no es válido o ya fue utilizado.' });
+        const review = rows[0];
+        return res.status(200).json({
+          review: {
+            product_id: review.product_id,
+            product_title: review.product_title,
+            order_number: review.order_number,
+            image: review.legacy_image || ''
+          }
+        });
+      }
+
+      if (action !== 'review_submit') return res.status(400).json({ error: 'Acción de opinión no válida.' });
+
+      const rating = Number(req.body?.rating);
+      const title = clean(req.body?.title, 120);
+      const body = clean(req.body?.body, 2000);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5 || body.length < 10) {
+        return res.status(400).json({ error: 'Elegí de 1 a 5 estrellas y escribí al menos 10 caracteres.' });
+      }
+
+      const replacementToken = crypto.randomBytes(24).toString('hex');
+      const rows = await sql`
+        UPDATE reviews r SET
+          rating=${rating},title=${title || null},body=${body},status='published',
+          submitted_at=NOW(),published_at=NOW(),review_token=${replacementToken}
+        FROM orders o
+        WHERE r.order_id=o.id
+          AND r.review_token=${token}
+          AND r.status='invited'
+          AND r.submitted_at IS NULL
+          AND o.status='delivered'
+          AND o.payment_status='approved'
+          AND COALESCE(o.payment_status_detail,'') NOT IN ('multiple_approved_conflict','partially_refunded')
+        RETURNING r.id,r.product_id,r.rating,r.status
+      `;
+      if (!rows.length) return res.status(409).json({ error: 'Este enlace ya fue utilizado o la compra ya no es elegible para opinar.' });
+      return res.status(200).json({ ok: true, review: rows[0] });
+    }
+
     if (req.method === 'GET' && query.get('sitemap')) {
       const products = await sql`SELECT id,updated_at FROM products WHERE active=true ORDER BY updated_at DESC`;
       const staticUrls = [
@@ -24,39 +90,6 @@ module.exports = async (req, res) => {
       res.setHeader('Content-Type', 'application/xml; charset=utf-8');
       res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
       return res.status(200).send(xml);
-    }
-
-    if (req.method === 'GET' && query.get('review_token')) {
-      const token = clean(query.get('review_token'), 80);
-      const rows = await sql`
-        SELECT r.product_id,r.status,r.rating,r.title,r.body,p.title AS product_title,
-          COALESCE((SELECT url FROM jsonb_array_elements_text(p.images) url LIMIT 1),'') AS legacy_image,
-          o.order_number,c.name AS customer_name
-        FROM reviews r JOIN products p ON p.id=r.product_id
-        JOIN orders o ON o.id=r.order_id LEFT JOIN customers c ON c.id=r.customer_id
-        WHERE r.review_token=${token} AND o.status='delivered' LIMIT 1
-      `;
-      if (!rows.length) return res.status(404).json({ error: 'Este enlace de opinión no es válido o el pedido todavía no fue entregado.' });
-      res.setHeader('Cache-Control', 'private, no-store');
-      return res.status(200).json({ review: { ...rows[0], image: rows[0].legacy_image } });
-    }
-
-    if (req.method === 'POST') {
-      const token = clean(req.body?.token, 80);
-      const rating = Number(req.body?.rating);
-      const title = clean(req.body?.title, 120);
-      const body = clean(req.body?.body, 2000);
-      if (!token || !Number.isInteger(rating) || rating < 1 || rating > 5 || body.length < 10) return res.status(400).json({ error: 'Elegí de 1 a 5 estrellas y escribí al menos 10 caracteres.' });
-      const rows = await sql`
-        UPDATE reviews r SET rating=${rating},title=${title || null},body=${body},
-          status='published',submitted_at=NOW(),published_at=NOW()
-        FROM orders o
-        WHERE r.order_id=o.id AND r.review_token=${token} AND o.status='delivered'
-        RETURNING r.id,r.product_id,r.rating,r.status
-      `;
-      if (!rows.length) return res.status(404).json({ error: 'Este enlace de opinión no es válido.' });
-      res.setHeader('Cache-Control', 'private, no-store');
-      return res.status(200).json({ ok: true, review: rows[0] });
     }
 
     if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido.' });
