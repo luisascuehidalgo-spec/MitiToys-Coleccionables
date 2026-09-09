@@ -70,6 +70,10 @@
     {
       "path": "/api/envios?action=automation",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cleanup-shipping-quotes",
+      "schedule": "17 5 * * *"
     }
   ]
 }
