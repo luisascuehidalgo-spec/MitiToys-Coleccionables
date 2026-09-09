@@ -2,10 +2,30 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const authPath = require.resolve('../api/admin-auth');
+const dbPath = require.resolve('../lib/db');
 
-function loadAuth() {
+function loadAuth(sql) {
   delete require.cache[authPath];
+  if (sql) {
+    require.cache[dbPath] = {
+      id: dbPath,
+      filename: dbPath,
+      loaded: true,
+      exports: { getDb: () => sql }
+    };
+  } else {
+    delete require.cache[dbPath];
+  }
   return require('../api/admin-auth');
+}
+
+function authSql() {
+  return async (strings) => {
+    const text = strings.join(' ');
+    if (/SELECT locked_until IS NOT NULL/.test(text)) return [];
+    if (/DELETE FROM admin_login_attempts/.test(text)) return [];
+    throw new Error('Unexpected SQL in admin session test: ' + text);
+  };
 }
 
 function request({ method = 'POST', password, cookie } = {}) {
@@ -72,6 +92,8 @@ test('login exige password y session secret configurados antes de emitir cookie'
   console.error = () => {};
   t.after(() => {
     console.error = previousError;
+    delete require.cache[authPath];
+    delete require.cache[dbPath];
     if (previousPassword === undefined) delete process.env.ADMIN_PASSWORD;
     else process.env.ADMIN_PASSWORD = previousPassword;
     if (previousSecret === undefined) delete process.env.ADMIN_SESSION_SECRET;
@@ -80,7 +102,7 @@ test('login exige password y session secret configurados antes de emitir cookie'
 
   process.env.ADMIN_PASSWORD = 'configured-password';
   delete process.env.ADMIN_SESSION_SECRET;
-  let auth = loadAuth();
+  let auth = loadAuth(authSql());
   let res = response();
   await auth(request({ password: 'configured-password' }), res);
   assert.equal(res.statusCode, 503);
@@ -88,7 +110,7 @@ test('login exige password y session secret configurados antes de emitir cookie'
   assert.deepEqual(res.body, { error: 'Administración no disponible temporalmente.' });
 
   process.env.ADMIN_SESSION_SECRET = 'configured-secret';
-  auth = loadAuth();
+  auth = loadAuth(authSql());
   res = response();
   await auth(request({ password: 'configured-password' }), res);
   assert.equal(res.statusCode, 200);
