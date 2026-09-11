@@ -61,7 +61,7 @@ test('missing configuration fails without storing photos',async t=>{
 });
 test('validates count, missing product, mime, empty bytes and size',async t=>{
   setup(t);global.fetch=()=>assert.fail('provider called');
-  imageDb({count:4,legacy:4});assert.equal((await call(imageHandler,'POST')).code,400);
+  imageDb({legacy:8});assert.equal((await call(imageHandler,'POST')).code,400);
   imageDb({exists:false});assert.equal((await call(imageHandler,'POST')).code,404);
   imageDb();assert.equal((await call(imageHandler,'POST',{mime:'image/svg+xml'})).code,400);
   assert.equal((await call(imageHandler,'POST',{bytes:Buffer.alloc(0)})).code,400);
