@@ -160,10 +160,14 @@ test('webhook usa máquina de estados y valida importe/moneda antes de aprobar',
 test('checkout legado está cerrado y la home nunca lo invoca', () => {
   const legacy = read('api/crear-preferencia.js');
   const home = read('index.html');
+  const cart = read('carrito.js');
   assert.match(legacy, /status\(410\)/);
   assert.match(legacy, /LEGACY_CHECKOUT_DISABLED/);
   assert.doesNotMatch(home, /fetch\('\/api\/crear-preferencia'/);
-  assert.match(home, /window\.location\.href='\/checkout\.html\?cart=1'/);
+  assert.doesNotMatch(home, /window\.location\.href='\/checkout\.html\?cart=1'/);
+  assert.match(home, /<script src="\/carrito\.js\?v=8"><\/script>/);
+  assert.match(cart, /window\.pagar\s*=/);
+  assert.match(cart, /window\.location\.href\s*=\s*'\/checkout\.html\?cart=1'/);
 });
 
 test('admin backend y UI comparten reglas respaldadas por Mercado Pago', () => {

@@ -40,12 +40,6 @@
 </main>
 <footer>© 2026 Mititoys coleccionables · Figuras de anime para coleccionistas</footer>
 <script>
-const galleryImages={
-  '3377':['https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/20241123034449_1.jpg','https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/20241123034449_2.jpg','https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/20241123034449_3.jpg','https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/ChatGPT%20Image%201%20sept%202026%2C%2006_38_43%20p.m..png'],
-  '3375':['https://raw.githubusercontent.com/luisascuehidalgo-spec/COD-3375/main/D_NQ_NP_2X_758000-MLA115602430906_092026-F.webp','https://raw.githubusercontent.com/luisascuehidalgo-spec/COD-3375/main/D_NQ_NP_2X_859621-MLA117043297919_092026-F.webp']
-};
-function changeGallery(id,el){const main=document.getElementById('main'+id);const img=el.querySelector('.thumb');if(main&&img)main.src=img.src;el.parentElement.querySelectorAll('.thumbwrap').forEach(x=>x.classList.remove('active'));el.classList.add('active');}
-function pagar(productId,button){const key=String(productId);try{if(window.MitiToysCart&&typeof window.MitiToysCart.add==='function'){window.MitiToysCart.add(key,1)}else{const raw=JSON.parse(localStorage.getItem('mititoys_cart')||'[]');const cart=Array.isArray(raw)?raw:[];const found=cart.find(x=>String(x.id)===key);if(found)found.qty=Math.max(1,Number(found.qty)||1)+1;else cart.push({id:key,qty:1});localStorage.setItem('mititoys_cart',JSON.stringify(cart))}}catch(_){}if(button){button.disabled=true;button.textContent='⏳ ABRIENDO CHECKOUT...'}window.location.href='/checkout.html?cart=1';}
 (function(){const params=new URLSearchParams(window.location.search);const pago=params.get('pago');const box=document.getElementById('paymentStatus');if(!pago||!box)return;const messages={exitoso:'✅ Pago aprobado. ¡Gracias por comprar en Mititoys coleccionables!',pendiente:'🕐 Tu pago está pendiente. Cuando Mercado Pago confirme la operación, revisaremos el estado.',fallido:'❌ El pago no se completó. Podés intentarlo nuevamente o consultarnos por WhatsApp.'};if(messages[pago]){box.textContent=messages[pago];box.style.display='block';}})();
 </script>
 <script src="/carrito.js?v=8"></script>
