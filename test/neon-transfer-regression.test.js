@@ -6,6 +6,7 @@ const { execFileSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const productTemplate = 'templates/producto.html';
 
 test('catálogo público no fuerza cache miss ni referencia imágenes binarias de Neon', () => {
   const catalog = read('catalogo-dinamico.js');
@@ -17,12 +18,12 @@ test('catálogo público no fuerza cache miss ni referencia imágenes binarias d
 });
 
 test('home, ficha, carrito y checkout no dependen de imágenes binarias de Neon', () => {
-  for (const file of ['index.html', 'producto.html', 'carrito.html', 'checkout.html']) {
+  for (const file of ['index.html', productTemplate, 'carrito.html', 'checkout.html']) {
     const source = read(file);
     assert.doesNotMatch(source, /\/api\/productos\?cb=/, `${file} volvió a forzar cache-busting del catálogo`);
     assert.doesNotMatch(source, /\/api\/product-image/, `${file} volvió a depender de imágenes binarias de Neon`);
   }
-  assert.match(read('producto.html'), /fetch\('\/api\/productos'/);
+  assert.match(read(productTemplate), /fetch\('\/api\/productos'/);
   assert.match(read('carrito.html'), /fetch\('\/api\/productos'\)/);
   assert.match(read('checkout.html'), /fetch\('\/api\/productos'\)/);
 });
