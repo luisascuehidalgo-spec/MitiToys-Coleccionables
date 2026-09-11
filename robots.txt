@@ -1,5 +1,6 @@
 User-agent: *
 Allow: /
 Disallow: /admin.html
+Disallow: /admin-envios.html
 Disallow: /api/
 Sitemap: https://mititoys.com/sitemap.xml
