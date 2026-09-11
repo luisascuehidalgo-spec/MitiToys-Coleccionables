@@ -53,6 +53,7 @@ test('todas las APIs admin conocidas son private no-store', () => {
 test('rewrites y cron de envíos existentes permanecen intactos', () => {
   assert.deepEqual(config.rewrites, [
     { source: '/sitemap.xml', destination: '/api/productos?sitemap=1' },
+    { source: '/producto.html', destination: '/api/product-page' },
     { source: '/anuncio', destination: '/api/anuncio' }
   ]);
   assert.ok((config.crons || []).some(cron =>
