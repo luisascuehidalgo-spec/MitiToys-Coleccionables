@@ -5,7 +5,8 @@ const path = require('node:path');
 const { renderProductSeo } = require('../lib/product-page-seo');
 
 const root = path.join(__dirname, '..');
-const template = fs.readFileSync(path.join(root, 'producto.html'), 'utf8');
+const templatePath = path.join(root, 'templates', 'producto.html');
+const template = fs.readFileSync(templatePath, 'utf8');
 
 test('server product renderer writes product-specific metadata into raw HTML', () => {
   const product = {
@@ -34,10 +35,13 @@ test('out-of-stock product schema is rendered as OutOfStock', () => {
   assert.match(html, /"availability":"https:\/\/schema\.org\/OutOfStock"/);
 });
 
-test('vercel keeps the existing product URL and routes it through the metadata handler', () => {
+test('vercel product URL cannot be shadowed by a public static producto.html', () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8'));
   assert.ok(config.rewrites.some(rule => rule.source === '/producto.html' && rule.destination === '/api/product-page'));
+  assert.equal(fs.existsSync(path.join(root, 'producto.html')), false);
+  assert.equal(fs.existsSync(templatePath), true);
   const source = fs.readFileSync(path.join(root, 'api/product-page.js'), 'utf8');
+  assert.match(source, /templates.*producto\.html/);
   assert.match(source, /searchParams\(req\)/);
   assert.doesNotMatch(source, /req\.query/);
   assert.match(source, /renderProductSeo\(template, product\)/);
