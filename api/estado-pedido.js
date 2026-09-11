@@ -2,6 +2,12 @@ const { getDb } = require('../lib/db');
 const { ensureReviewInvites } = require('../lib/notifications');
 const { publicOrderStatus } = require('../lib/order-state');
 const { PREFERENCE_TTL_MS } = require('../lib/payments');
+const {
+  ORDER_STATUS_LOCK_MINUTES,
+  orderStatusRateKey,
+  orderStatusBlocked,
+  recordOrderStatusFailure
+} = require('../lib/order-status-rate-limit');
 
 function safePendingPaymentUrl(order) {
   if (order?.status !== 'pending' || String(order?.payment_status || 'pending') !== 'pending') return null;
@@ -39,6 +45,12 @@ module.exports = async (req, res) => {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Ingresá el email utilizado en la compra.' });
 
     const sql = getDb();
+    const rateKey = orderStatusRateKey(req, process.env.ADMIN_SESSION_SECRET);
+    if (rateKey && await orderStatusBlocked(sql, rateKey)) {
+      res.setHeader('Retry-After', String(ORDER_STATUS_LOCK_MINUTES * 60));
+      return res.status(429).json({ error: 'Demasiados intentos. Esperá unos minutos antes de volver a consultar.' });
+    }
+
     const rows = await sql`
       SELECT o.id,o.order_number,o.product_title,o.quantity,o.subtotal_amount,o.shipping_amount,o.total_amount,o.currency,
         o.status,o.payment_status,o.payment_status_detail,o.payment_url,o.shipping_status,o.shipping_recipient,o.shipping_city,o.shipping_province,
@@ -47,7 +59,14 @@ module.exports = async (req, res) => {
       FROM orders o JOIN customers c ON c.id=o.customer_id
       WHERE o.order_number=${number} AND LOWER(c.email)=${email} LIMIT 1
     `;
-    if (!rows.length) return res.status(404).json({ error: 'No encontramos un pedido que coincida con ese número y email.' });
+    if (!rows.length) {
+      const attempt = await recordOrderStatusFailure(sql, rateKey);
+      if (attempt.locked) {
+        res.setHeader('Retry-After', String(ORDER_STATUS_LOCK_MINUTES * 60));
+        return res.status(429).json({ error: 'Demasiados intentos. Esperá unos minutos antes de volver a consultar.' });
+      }
+      return res.status(404).json({ error: 'No encontramos un pedido que coincida con ese número y email.' });
+    }
 
     const order = rows[0];
     order.status = publicOrderStatus(order);
