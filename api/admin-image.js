@@ -50,12 +50,11 @@ module.exports = async (req, res) => {
       if (!ALLOWED.has(mime)) return res.status(400).json({ error: 'Formato no permitido. Usá JPG, PNG o WEBP.' });
       configuration();
 
-      const products = await sql`
-        SELECT id,COALESCE(jsonb_array_length(images),0)::int AS image_count
-        FROM products WHERE id=${productId} LIMIT 1
-      `;
-      if (!products.length) return res.status(404).json({ error: 'Producto no encontrado.' });
-      if (Number(products[0].image_count || 0) >= 8) return res.status(400).json({ error: 'Este producto ya tiene el máximo de 8 fotos.' });
+      const product = await sql`SELECT id FROM products WHERE id=${productId} LIMIT 1`;
+      if (!product.length) return res.status(404).json({ error: 'Producto no encontrado.' });
+      const counts = await sql`SELECT COALESCE(jsonb_array_length(images),0)::int AS count FROM products WHERE id=${productId}`;
+      const imageCount = Number(counts[0]?.count || 0);
+      if (imageCount >= 8) return res.status(400).json({ error: 'Este producto ya tiene el máximo de 8 fotos.' });
 
       const body = await readBody(req);
       if (!body.length) return res.status(400).json({ error: 'La imagen está vacía.' });
