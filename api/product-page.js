@@ -4,7 +4,7 @@ const { getDb } = require('../lib/db');
 const { searchParams } = require('../lib/request-url');
 const { renderProductSeo } = require('../lib/product-page-seo');
 
-const template = fs.readFileSync(path.join(__dirname, '..', 'producto.html'), 'utf8');
+const template = fs.readFileSync(path.join(__dirname, '..', 'templates', 'producto.html'), 'utf8');
 const clean = (value, max = 80) => String(value || '').trim().slice(0, max);
 
 module.exports = async (req, res) => {
