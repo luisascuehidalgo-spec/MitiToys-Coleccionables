@@ -1,0 +1,44 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { renderProductSeo } = require('../lib/product-page-seo');
+
+const root = path.join(__dirname, '..');
+const template = fs.readFileSync(path.join(root, 'producto.html'), 'utf8');
+
+test('server product renderer writes product-specific metadata into raw HTML', () => {
+  const product = {
+    id: '3142',
+    title: 'Figura Luffy Gear 5 Nika',
+    description: 'Figura coleccionable de One Piece con detalles de Gear 5.',
+    images: ['https://example.com/luffy.jpg'],
+    price: '150000.00',
+    stock_managed: true,
+    stock_quantity: 5,
+    rating: 4.75,
+    reviews_count: 8
+  };
+  const html = renderProductSeo(template, product);
+  assert.match(html, /<title>Figura Luffy Gear 5 Nika \| Mititoys<\/title>/);
+  assert.match(html, /canonical" href="https:\/\/mititoys\.com\/producto\.html\?id=3142"/);
+  assert.match(html, /property="og:title" content="Figura Luffy Gear 5 Nika"/);
+  assert.match(html, /property="og:image" content="https:\/\/example\.com\/luffy\.jpg"/);
+  assert.match(html, /"priceCurrency":"ARS"/);
+  assert.match(html, /"availability":"https:\/\/schema\.org\/InStock"/);
+  assert.match(html, /"reviewCount":8/);
+});
+
+test('out-of-stock product schema is rendered as OutOfStock', () => {
+  const html = renderProductSeo(template, { id: 'x', title: 'Sin stock', images: [], price: 10, stock_managed: true, stock_quantity: 0 });
+  assert.match(html, /"availability":"https:\/\/schema\.org\/OutOfStock"/);
+});
+
+test('vercel keeps the existing product URL and routes it through the metadata handler', () => {
+  const config = JSON.parse(fs.readFileSync(path.join(root, 'vercel.json'), 'utf8'));
+  assert.ok(config.rewrites.some(rule => rule.source === '/producto.html' && rule.destination === '/api/product-page'));
+  const source = fs.readFileSync(path.join(root, 'api/product-page.js'), 'utf8');
+  assert.match(source, /searchParams\(req\)/);
+  assert.doesNotMatch(source, /req\.query/);
+  assert.match(source, /renderProductSeo\(template, product\)/);
+});
