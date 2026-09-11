@@ -6,6 +6,10 @@
       "destination": "/api/productos?sitemap=1"
     },
     {
+      "source": "/producto.html",
+      "destination": "/api/product-page"
+    },
+    {
       "source": "/anuncio",
       "destination": "/api/anuncio"
     }
