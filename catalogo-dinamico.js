@@ -79,28 +79,6 @@
     }
   }
 
-  function prepareExistingCards(grid) {
-    grid.classList.add('catalog-ready');
-    grid.querySelectorAll('.card').forEach((card, index) => {
-      card.classList.add('catalog-card');
-      const badge = card.querySelector('.badge');
-      const title = card.querySelector('h3')?.textContent || '';
-      const description = card.querySelector('.desc')?.textContent || '';
-      const id = badge?.textContent.replace(/^COD\s*/i, '').trim() || '';
-      const priceText = card.querySelector('.price')?.textContent || '';
-      card.dataset.productId = id;
-      card.dataset.search = normalize(`${id} ${title} ${description}`);
-      card.dataset.sortName = normalize(title);
-      card.dataset.price = String(Number(priceText.replace(/\D/g, '')) || 0);
-      card.dataset.created = '0';
-      card.dataset.originalOrder = String(index);
-      card.querySelectorAll('img').forEach(image => {
-        image.loading = 'lazy';
-        image.decoding = 'async';
-      });
-    });
-  }
-
   function renderProduct(grid, product, index) {
     if (!product || product.active === false) return;
     const images = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
