@@ -64,6 +64,12 @@
       ]
     },
     {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }
+      ]
+    },
+    {
       "source": "/seguimiento.html",
       "headers": [
         { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
