@@ -103,8 +103,9 @@
 
   function renderProduct(grid, product, index) {
     if (!product || product.active === false) return;
-    const images = Array.isArray(product.images) ? product.images.filter(Boolean).slice(0, 4) : [];
-    if (!images.length) return;
+    const images = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
+    const primaryImage = images[0];
+    if (!primaryImage) return;
 
     const stockManaged = Boolean(product.stock_managed);
     const stockQuantity = Math.max(0, Number(product.stock_quantity || 0));
@@ -114,7 +115,6 @@
       : 'Sin stock';
     const title = String(product.title || `Producto COD ${product.id}`);
     const description = shortDescription(product.description);
-    const thumbs = images.map((url, imageIndex) => `<button type="button" class="thumbwrap ${imageIndex === 0 ? 'active' : ''}" data-index="${imageIndex}" aria-label="Ver foto ${imageIndex + 1} de ${esc(title)}"><img class="thumb" src="${esc(url)}" alt="" loading="lazy" decoding="async"><img class="thumbwm" src="${logo}" alt="" loading="lazy" decoding="async"></button>`).join('');
 
     const card = document.createElement('article');
     card.className = 'card catalog-card dynamic-product';
@@ -124,17 +124,7 @@
     card.dataset.price = String(Number(product.price || 0));
     card.dataset.created = String(Date.parse(product.created_at || '') || 0);
     card.dataset.originalOrder = String(index);
-    card.innerHTML = `<div class="gallery"><div class="main-photo"><span class="badge">COD ${esc(product.id)}</span><span class="stock-chip ${available ? '' : 'out'}">${esc(stockText)}</span><img class="mainimg" src="${esc(images[0])}" alt="${esc(title)}" loading="lazy" decoding="async" width="600" height="600"><img class="watermark" src="${logo}" alt="" loading="lazy" decoding="async" width="88" height="50"></div><div class="thumbs">${thumbs}</div></div><div class="body"><h3>${esc(title)}</h3><p class="desc">${esc(description)}</p><div class="specs"><span>📦 ${esc(stockText)}</span></div><div class="price">${money(product.price)} ARS</div><div class="card-actions"><a class="catalog-detail" href="/producto.html?id=${encodeURIComponent(product.id)}">VER PRODUCTO</a><button class="paybtn cart-add" type="button" ${available ? '' : 'disabled'}>${available ? '🛒 AGREGAR AL CARRITO' : 'SIN STOCK'}</button></div></div>`;
-
-    card.querySelectorAll('.thumbwrap').forEach(thumb => {
-      thumb.addEventListener('click', () => {
-        const main = card.querySelector('.mainimg');
-        const image = thumb.querySelector('.thumb');
-        if (main && image) main.src = image.src;
-        card.querySelectorAll('.thumbwrap').forEach(item => item.classList.remove('active'));
-        thumb.classList.add('active');
-      });
-    });
+    card.innerHTML = `<div class="gallery"><div class="main-photo"><span class="badge">COD ${esc(product.id)}</span><span class="stock-chip ${available ? '' : 'out'}">${esc(stockText)}</span><a href="/producto.html?id=${encodeURIComponent(product.id)}" aria-label="Ver ${esc(title)}"><img class="mainimg" src="${esc(primaryImage)}" alt="${esc(title)}" loading="lazy" decoding="async" fetchpriority="low" width="600" height="600"></a><img class="watermark" src="${logo}" alt="" loading="lazy" decoding="async" width="88" height="50"></div></div><div class="body"><h3>${esc(title)}</h3><p class="desc">${esc(description)}</p><div class="specs"><span>📦 ${esc(stockText)}</span></div><div class="price">${money(product.price)} ARS</div><div class="card-actions"><a class="catalog-detail" href="/producto.html?id=${encodeURIComponent(product.id)}">VER PRODUCTO</a><button class="paybtn cart-add" type="button" ${available ? '' : 'disabled'}>${available ? '🛒 AGREGAR AL CARRITO' : 'SIN STOCK'}</button></div></div>`;
 
     const addButton = card.querySelector('.cart-add');
     if (addButton && available) {
@@ -143,8 +133,10 @@
       });
     }
 
-    card.querySelector('.catalog-detail')?.addEventListener('click', () => {
-      window.MitiToysAnalytics?.track('product_select', { product_id: String(product.id), source: 'catalog' });
+    card.querySelectorAll('a[href^="/producto.html?id="]').forEach(link => {
+      link.addEventListener('click', () => {
+        window.MitiToysAnalytics?.track('product_select', { product_id: String(product.id), source: 'catalog' });
+      });
     });
 
     grid.appendChild(card);
