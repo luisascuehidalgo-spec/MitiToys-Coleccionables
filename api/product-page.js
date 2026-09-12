@@ -7,6 +7,15 @@ const { renderProductSeo } = require('../lib/product-page-seo');
 const template = fs.readFileSync(path.join(__dirname, '..', 'templates', 'producto.html'), 'utf8');
 const clean = (value, max = 80) => String(value || '').trim().slice(0, max);
 
+function serializeProductBootstrap(product) {
+  return JSON.stringify(product)
+    .replace(/&/g, '\\u0026')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).send('Método no permitido');
   const id = clean(searchParams(req).get('id'));
@@ -41,8 +50,10 @@ module.exports = async (req, res) => {
       rating: Number(rows[0].rating || 0),
       reviews_count: Number(rows[0].reviews_count || 0)
     };
+    const html = renderProductSeo(template, product)
+      .replace('"__MITITOYS_PRODUCT_BOOTSTRAP__"', serializeProductBootstrap(product));
     res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
-    return res.status(200).send(renderProductSeo(template, product));
+    return res.status(200).send(html);
   } catch (error) {
     console.error('product-page error:', 'code=' + String(error?.code || error?.name || 'PRODUCT_PAGE_ERROR'));
     res.setHeader('Cache-Control', 'no-store');
