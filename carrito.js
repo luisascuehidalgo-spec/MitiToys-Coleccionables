@@ -57,6 +57,18 @@
       window.MitiToysAnalytics?.track('remove_from_cart', { product_id: String(id) });
       return cart;
     },
+    prune(validIds) {
+      const allowed = validIds instanceof Set
+        ? new Set(Array.from(validIds, value => String(value)))
+        : new Set(Array.from(validIds || [], value => String(value)));
+      const cart = read();
+      const next = cart.filter(item => allowed.has(item.id));
+      if (next.length !== cart.length) {
+        save(next);
+        updateBadges();
+      }
+      return next;
+    },
     setQty(id, qty) {
       const cart = read();
       const found = cart.find(x => x.id === String(id));
