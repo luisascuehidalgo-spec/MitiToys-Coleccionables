@@ -1,22 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    {
-      "source": "/api/crear-preferencia-carrito",
-      "destination": "/api/checkout-gateway"
-    },
-    {
-      "source": "/sitemap.xml",
-      "destination": "/api/productos?sitemap=1"
-    },
-    {
-      "source": "/producto.html",
-      "destination": "/api/product-page"
-    },
-    {
-      "source": "/anuncio",
-      "destination": "/api/anuncio"
-    }
+    { "source": "/api/crear-preferencia-carrito", "destination": "/api/checkout-gateway" },
+    { "source": "/sitemap.xml", "destination": "/api/productos?sitemap=1" },
+    { "source": "/producto.html", "destination": "/api/product-page" },
+    { "source": "/anuncio", "destination": "/api/anuncio" }
   ],
   "headers": [
     {
@@ -73,7 +61,7 @@
       "source": "/seguimiento.html",
       "headers": [
         { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "X-Robots-Tag", "value": "noindex, follow" }
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }
       ]
     },
     {
@@ -120,43 +108,27 @@
     },
     {
       "source": "/api/admin",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
+      "headers": [{ "key": "Cache-Control", "value": "private, no-store, max-age=0" }]
     },
     {
       "source": "/api/admin-auth",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
+      "headers": [{ "key": "Cache-Control", "value": "private, no-store, max-age=0" }]
     },
     {
       "source": "/api/admin-product",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
+      "headers": [{ "key": "Cache-Control", "value": "private, no-store, max-age=0" }]
     },
     {
       "source": "/api/admin-shipping",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
+      "headers": [{ "key": "Cache-Control", "value": "private, no-store, max-age=0" }]
     },
     {
       "source": "/api/admin-image",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
+      "headers": [{ "key": "Cache-Control", "value": "private, no-store, max-age=0" }]
     }
   ],
   "crons": [
-    {
-      "path": "/api/envios?action=automation",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/cleanup-shipping-quotes",
-      "schedule": "17 5 * * *"
-    }
+    { "path": "/api/envios?action=automation", "schedule": "0 * * * *" },
+    { "path": "/api/cleanup-shipping-quotes", "schedule": "17 5 * * *" }
   ]
 }
