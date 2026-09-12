@@ -83,8 +83,7 @@ module.exports = async (req, res) => {
       const staticUrls = [
         ['https://mititoys.com/', '1.0'],
         ['https://mititoys.com/preguntas.html', '0.5'],
-        ['https://mititoys.com/politicas.html', '0.4'],
-        ['https://mititoys.com/seguimiento.html', '0.3']
+        ['https://mititoys.com/politicas.html', '0.4']
       ].map(([url, priority]) => `<url><loc>${url}</loc><priority>${priority}</priority></url>`);
       const productUrls = products.map(product => {
         const url = `https://mititoys.com/producto.html?id=${encodeURIComponent(product.id)}`;
