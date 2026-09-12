@@ -134,6 +134,8 @@
     const count = document.getElementById('catalogCount');
     const empty = document.getElementById('catalogEmpty');
     if (!search || !sort || !count || !empty) return () => {};
+    let searchAnalyticsTimer = null;
+    let lastTrackedSearch = '';
 
     const update = () => {
       const query = normalize(search.value);
@@ -165,7 +167,18 @@
 
     search.addEventListener('input', () => {
       update();
-      if (search.value.trim().length >= 2) window.MitiToysAnalytics?.track('catalog_search', { query: search.value.trim() });
+      clearTimeout(searchAnalyticsTimer);
+      const query = search.value.trim();
+      if (query.length < 2) {
+        lastTrackedSearch = '';
+        return;
+      }
+      searchAnalyticsTimer = setTimeout(() => {
+        const settledQuery = search.value.trim();
+        if (settledQuery.length < 2 || settledQuery === lastTrackedSearch) return;
+        window.MitiToysAnalytics?.track('catalog_search', { query: settledQuery });
+        lastTrackedSearch = settledQuery;
+      }, 600);
     });
     sort.addEventListener('change', () => {
       update();
