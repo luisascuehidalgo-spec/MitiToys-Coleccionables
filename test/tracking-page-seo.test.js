@@ -9,7 +9,7 @@ const productsApi = fs.readFileSync(path.join(__dirname, '..', 'api', 'productos
 test('order tracking page is noindex and omitted from sitemap', () => {
   const trackingRule = vercel.headers.find(rule => rule.source === '/seguimiento.html');
   const robots = trackingRule?.headers?.find(header => header.key === 'X-Robots-Tag');
-  assert.equal(robots?.value, 'noindex, follow');
+  assert.equal(robots?.value, 'noindex, nofollow, noarchive');
   const sitemapSection = productsApi.slice(productsApi.indexOf("if (req.method === 'GET' && query.get('sitemap'))"), productsApi.indexOf("if (req.method !== 'GET')"));
   assert.doesNotMatch(sitemapSection, /seguimiento\.html/);
   assert.match(sitemapSection, /preguntas\.html/);
