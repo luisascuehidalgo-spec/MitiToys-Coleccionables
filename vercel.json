@@ -16,6 +16,12 @@
   ],
   "headers": [
     {
+      "source": "/",
+      "headers": [
+        { "key": "Link", "value": "<https://user30281.na.imgto.link/public/20260906/chatgpt-image-4-sept-2026-05-57-01-p-m-3.avif>; rel=preload; as=image" }
+      ]
+    },
+    {
       "source": "/(.*)",
       "headers": [
         { "key": "X-Content-Type-Options", "value": "nosniff" },
