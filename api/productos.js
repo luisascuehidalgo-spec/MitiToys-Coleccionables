@@ -110,11 +110,12 @@ module.exports = async (req, res) => {
           FROM products p LEFT JOIN reviews r ON r.product_id=p.id
           WHERE p.active=true GROUP BY p.id ORDER BY p.title
         `;
+    const imageLimit = productId ? 8 : 1;
     const result = products.map(product => ({
       ...product,
       rating: Number(product.rating || 0),
       reviews_count: Number(product.reviews_count || 0),
-      images: Array.isArray(product.images) ? product.images.filter(Boolean).slice(0, 8) : []
+      images: Array.isArray(product.images) ? product.images.filter(Boolean).slice(0, imageLimit) : []
     }));
     let reviews = [];
     if (productId) {
