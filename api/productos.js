@@ -4,6 +4,11 @@ const { searchParams } = require('../lib/request-url');
 const clean = (value, max = 500) => String(value || '').trim().slice(0, max);
 const escapeXml = value => String(value ?? '').replace(/[<>&'\"]/g, char => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[char]));
 const validReviewToken = value => /^[a-f0-9]{48}$/i.test(String(value || ''));
+const catalogDescription = value => String(value || '')
+  .replace(/[\r\n]+/g, ' ')
+  .replace(/\s{2,}/g, ' ')
+  .trim()
+  .slice(0, 240);
 
 module.exports = async (req, res) => {
   const query = searchParams(req);
@@ -113,6 +118,7 @@ module.exports = async (req, res) => {
     const imageLimit = productId ? 8 : 1;
     const result = products.map(product => ({
       ...product,
+      description: productId ? product.description : catalogDescription(product.description),
       rating: Number(product.rating || 0),
       reviews_count: Number(product.reviews_count || 0),
       images: Array.isArray(product.images) ? product.images.filter(Boolean).slice(0, imageLimit) : []
