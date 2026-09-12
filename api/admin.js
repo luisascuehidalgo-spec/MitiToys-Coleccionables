@@ -408,10 +408,6 @@ module.exports = async (req,res)=>{
       `;
       const customers=await sql`SELECT c.id,c.name,c.email,c.phone,c.city,c.created_at,COUNT(o.id)::int AS orders_count,COALESCE(SUM(CASE WHEN o.payment_status='approved' THEN o.total_amount ELSE 0 END),0)::numeric AS total_spent FROM customers c LEFT JOIN orders o ON o.customer_id=c.id GROUP BY c.id ORDER BY c.created_at DESC LIMIT 500`;
       const products=await sql`SELECT id,title,description,images,price,stock_quantity,stock_managed,active,weight_kg,package_length_cm,package_width_cm,package_height_cm,created_at,updated_at FROM products ORDER BY active DESC,title ASC`;
-      const uploaded=await sql`SELECT id,product_id,filename,mime_type,sort_order,created_at FROM product_images ORDER BY product_id,sort_order,id`;
-      const productImages={};
-      for(const image of uploaded){ if(!productImages[image.product_id]) productImages[image.product_id]=[]; productImages[image.product_id].push({id:image.id,filename:image.filename,mime_type:image.mime_type,sort_order:image.sort_order,url:'/api/product-image?id='+image.id}); }
-      for(const product of products) product.uploaded_images=productImages[product.id]||[];
       return res.status(200).json({orders,customers,products});
     }
 
