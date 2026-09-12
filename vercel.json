@@ -62,30 +62,35 @@
     {
       "source": "/seguimiento.html",
       "headers": [
+        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
         { "key": "X-Robots-Tag", "value": "noindex, follow" }
       ]
     },
     {
       "source": "/pedido.html",
       "headers": [
+        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
         { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }
       ]
     },
     {
       "source": "/carrito.html",
       "headers": [
+        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
         { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }
       ]
     },
     {
       "source": "/checkout.html",
       "headers": [
+        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
         { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }
       ]
     },
     {
       "source": "/opinar.html",
       "headers": [
+        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
         { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }
       ]
     },
