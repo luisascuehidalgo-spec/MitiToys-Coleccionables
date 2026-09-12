@@ -108,18 +108,19 @@ module.exports = async (req, res) => {
           GROUP BY p.id ORDER BY p.title
         `
       : await sql`
-          SELECT p.id,p.title,p.description,p.images,p.price,p.stock_quantity,p.stock_managed,p.active,p.created_at,p.updated_at,
-            COALESCE(AVG(r.rating) FILTER(WHERE r.status='published'),0)::numeric(3,2) AS rating,
-            COUNT(r.id) FILTER(WHERE r.status='published')::int AS reviews_count
-          FROM products p LEFT JOIN reviews r ON r.product_id=p.id
-          WHERE p.active=true GROUP BY p.id ORDER BY p.title
+          SELECT p.id,p.title,p.description,p.images,p.price,p.stock_quantity,p.stock_managed,p.active,p.created_at,p.updated_at
+          FROM products p
+          WHERE p.active=true
+          ORDER BY p.title
         `;
     const imageLimit = productId ? 8 : 1;
     const result = products.map(product => ({
       ...product,
       description: productId ? product.description : catalogDescription(product.description),
-      rating: Number(product.rating || 0),
-      reviews_count: Number(product.reviews_count || 0),
+      ...(productId ? {
+        rating: Number(product.rating || 0),
+        reviews_count: Number(product.reviews_count || 0)
+      } : {}),
       images: Array.isArray(product.images) ? product.images.filter(Boolean).slice(0, imageLimit) : []
     }));
     let reviews = [];
