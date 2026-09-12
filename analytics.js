@@ -3,7 +3,10 @@
     (window.vaq = window.vaq || []).push(arguments);
   };
 
-  const clean = value => String(value ?? '').slice(0, 120);
+  const redact = value => String(value ?? '')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+    .replace(/(?:\+?\d[\s().-]*){8,}/g, '[redacted-phone]');
+  const clean = value => redact(value).slice(0, 120);
   const number = value => Number.isFinite(Number(value)) ? Number(value) : undefined;
 
   function track(name, properties = {}) {
