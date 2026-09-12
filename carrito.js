@@ -1,5 +1,6 @@
 (() => {
   const KEY = 'mititoys_cart';
+  const STOCK_NOTICE_KEY = 'mititoys_cart_stock_notice';
 
   const read = () => {
     try {
@@ -31,6 +32,56 @@
       if (el.textContent !== nextText) el.textContent = nextText;
     });
   };
+
+  function showStockNotice() {
+    if (!window.location.pathname.endsWith('/carrito.html')) return;
+    let message = '';
+    try {
+      message = sessionStorage.getItem(STOCK_NOTICE_KEY) || '';
+      sessionStorage.removeItem(STOCK_NOTICE_KEY);
+    } catch (_) {
+      return;
+    }
+    if (!message) return;
+    const cart = document.getElementById('cart');
+    if (!cart?.parentNode) return;
+    const notice = document.createElement('div');
+    notice.className = 'cart-warning';
+    notice.setAttribute('role', 'status');
+    notice.textContent = message;
+    cart.parentNode.insertBefore(notice, cart);
+  }
+
+  async function guardCheckoutStock() {
+    if (!window.location.pathname.endsWith('/checkout.html')) return;
+    const cart = read();
+    if (!cart.length) return;
+    try {
+      const response = await fetch('/api/productos', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store'
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      const products = Array.isArray(data.products) ? data.products : [];
+      const invalid = cart.find(item => {
+        const product = products.find(candidate => String(candidate.id) === item.id);
+        if (!product) return true;
+        if (!product.stock_managed) return false;
+        const available = Math.max(0, Math.floor(Number(product.stock_quantity) || 0));
+        return item.qty > available;
+      });
+      if (!invalid) return;
+      try {
+        sessionStorage.setItem(STOCK_NOTICE_KEY, 'El stock cambió desde que armaste el carrito. Revisamos las cantidades disponibles antes de continuar.');
+      } catch (_) {
+        // Redirecting to the cart is still safe if session storage is unavailable.
+      }
+      window.location.replace('/carrito.html');
+    } catch (_) {
+      // Advisory check only. The checkout API remains the authoritative stock guard.
+    }
+  }
 
   window.MitiToysCart = {
     get: read,
@@ -113,6 +164,8 @@
 
   function init() {
     updateBadges();
+    showStockNotice();
+    void guardCheckoutStock();
   }
 
   if (document.readyState === 'loading') {
