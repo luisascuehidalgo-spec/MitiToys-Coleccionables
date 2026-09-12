@@ -98,6 +98,14 @@ module.exports = async (req, res) => {
 
     if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido.' });
     const productId = clean(query.get('id'), 50);
+    const reviewsPromise = productId
+      ? sql`
+          SELECT r.rating,r.title,r.body,r.published_at,COALESCE(NULLIF(SPLIT_PART(c.name,' ',1),''),'Cliente') AS customer_name
+          FROM reviews r LEFT JOIN customers c ON c.id=r.customer_id
+          WHERE r.product_id=${productId} AND r.status='published'
+          ORDER BY r.published_at DESC LIMIT 20
+        `
+      : null;
     const products = productId
       ? await sql`
           SELECT p.id,p.title,p.description,p.images,p.price,p.stock_quantity,p.stock_managed,p.active,p.created_at,p.updated_at,
@@ -123,15 +131,7 @@ module.exports = async (req, res) => {
       } : {}),
       images: Array.isArray(product.images) ? product.images.filter(Boolean).slice(0, imageLimit) : []
     }));
-    let reviews = [];
-    if (productId) {
-      reviews = await sql`
-        SELECT r.rating,r.title,r.body,r.published_at,COALESCE(NULLIF(SPLIT_PART(c.name,' ',1),''),'Cliente') AS customer_name
-        FROM reviews r LEFT JOIN customers c ON c.id=r.customer_id
-        WHERE r.product_id=${productId} AND r.status='published'
-        ORDER BY r.published_at DESC LIMIT 20
-      `;
-    }
+    const reviews = reviewsPromise ? await reviewsPromise : [];
     res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
     return res.status(200).json({ products: result, reviews });
   } catch (error) {
