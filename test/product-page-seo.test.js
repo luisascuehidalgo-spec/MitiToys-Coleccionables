@@ -46,3 +46,16 @@ test('vercel product URL cannot be shadowed by a public static producto.html', (
   assert.doesNotMatch(source, /req\.query/);
   assert.match(source, /renderProductSeo\(template, product\)/);
 });
+
+test('product page bootstraps the current server product and has no hardcoded product fallbacks', () => {
+  const source = fs.readFileSync(path.join(root, 'api/product-page.js'), 'utf8');
+  assert.match(template, /const serverProduct="__MITITOYS_PRODUCT_BOOTSTRAP__";/);
+  assert.doesNotMatch(template, /const fallbacks\s*=/);
+  assert.doesNotMatch(template, /20241123034449_1\.jpg/);
+  assert.doesNotMatch(template, /COD-3375\/main/);
+  assert.match(template, /typeof serverProduct==='object'/);
+  assert.match(source, /function serializeProductBootstrap\(product\)/);
+  assert.match(source, /replace\('\"__MITITOYS_PRODUCT_BOOTSTRAP__\"', serializeProductBootstrap\(product\)\)/);
+  assert.match(source, /replace\(\/&\/g, '\\\\u0026'\)/);
+  assert.match(source, /replace\(\/<\/g, '\\\\u003c'\)/);
+});
