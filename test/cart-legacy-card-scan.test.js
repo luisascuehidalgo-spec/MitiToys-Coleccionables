@@ -8,7 +8,9 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'carrito.js'), 'utf8')
 test('cart bootstrap no longer scans retired static catalog cards', () => {
   assert.doesNotMatch(source, /addButtonsToExistingCards/);
   assert.doesNotMatch(source, /querySelectorAll\('#catalogo \.card'\)/);
-  assert.match(source, /function init\(\) \{\s*updateBadges\(\);\s*\}/);
+  const initBody = source.match(/function init\(\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+  assert.match(initBody, /updateBadges\(\)/);
+  assert.doesNotMatch(initBody, /#catalogo \.card/);
 });
 
 test('cart functionality and badge updates remain available', () => {
