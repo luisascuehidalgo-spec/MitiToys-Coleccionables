@@ -2,6 +2,10 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
+      "source": "/api/crear-preferencia-carrito",
+      "destination": "/api/checkout-gateway"
+    },
+    {
       "source": "/sitemap.xml",
       "destination": "/api/productos?sitemap=1"
     },
