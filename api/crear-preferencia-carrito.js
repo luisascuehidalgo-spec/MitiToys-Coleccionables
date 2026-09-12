@@ -11,10 +11,6 @@ const { PUBLIC_BASE_URL, preferenceWindow, createPreferenceWithReconciliation } 
 const { persistPreferenceIdentity } = require('../lib/external-identities');
 
 const clean = (value, max = 200) => String(value || '').trim().slice(0, max);
-const PRODUCTOS = {
-  '3377': { id: '3377', title: 'Figura Luffy Gear 5 – Nika – One Piece – 31 cm', description: 'Figura coleccionable de Monkey D. Luffy Gear 5 / Nika, One Piece. 31 cm aprox., PVC, incluye figura + caja.', price: 150000, picture_url: 'https://raw.githubusercontent.com/luisascuehidalgo-spec/imagenes/main/20241123034449_1.jpg' },
-  '3375': { id: '3375', title: 'Figura One Piece Kaido Dragón 30 Cm PVC Coleccionable Anime', description: 'Estatua coleccionable de Kaido con dragón azul. 30 cm aprox. de altura, 37 cm aprox. de ancho, PVC.', price: 300000, picture_url: 'https://raw.githubusercontent.com/luisascuehidalgo-spec/COD-3375/main/D_NQ_NP_2X_758000-MLA115602430906_092026-F.webp' }
-};
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
@@ -41,20 +37,20 @@ module.exports = async (req, res) => {
 
     for (const requested of normalizedItems) {
       const rows = await sql`SELECT id,title,description,price,stock_quantity,stock_managed,active,images FROM products WHERE id=${requested.id} LIMIT 1`;
-      const product = rows[0] || PRODUCTOS[requested.id];
+      const product = rows[0];
       if (!product) return res.status(400).json({ error: `Producto no válido: ${requested.id}.` });
       if (product.active === false) return res.status(409).json({ error: `El producto ${product.title} ya no está disponible.` });
       const price = Number(product.price);
       if (!Number.isFinite(price) || price < 0) throw new Error('Precio de producto inválido.');
 
-      let pictureUrl = PRODUCTOS[requested.id]?.picture_url || '';
+      let pictureUrl = '';
       const productImages = Array.isArray(product.images) ? product.images.filter(Boolean) : [];
       if (productImages[0]) pictureUrl = String(productImages[0]);
 
       items.push({
         id: requested.id,
         title: String(product.title),
-        description: clean(product.description || PRODUCTOS[requested.id]?.description || 'Figura coleccionable de anime.', 600),
+        description: clean(product.description || 'Figura coleccionable de anime.', 600),
         price,
         qty: requested.qty,
         stockManaged: Boolean(product.stock_managed),
