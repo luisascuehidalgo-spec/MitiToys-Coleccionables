@@ -16,6 +16,18 @@ function serializeProductBootstrap(product) {
     .replace(/\u2029/g, '\\u2029');
 }
 
+function productImagePreload(images) {
+  const first = Array.isArray(images) ? images.find(Boolean) : '';
+  if (!first) return '';
+  try {
+    const url = new URL(String(first));
+    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    return `<${url.href}>; rel=preload; as=image`;
+  } catch (_) {
+    return '';
+  }
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'GET') return res.status(405).send('Método no permitido');
   const id = clean(searchParams(req).get('id'));
@@ -50,6 +62,8 @@ module.exports = async (req, res) => {
       rating: Number(rows[0].rating || 0),
       reviews_count: Number(rows[0].reviews_count || 0)
     };
+    const preload = productImagePreload(product.images);
+    if (preload) res.setHeader('Link', preload);
     const html = renderProductSeo(template, product)
       .replace('"__MITITOYS_PRODUCT_BOOTSTRAP__"', serializeProductBootstrap(product));
     res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
@@ -60,3 +74,5 @@ module.exports = async (req, res) => {
     return res.status(500).send(template);
   }
 };
+
+module.exports.productImagePreload = productImagePreload;
