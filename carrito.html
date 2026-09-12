@@ -23,6 +23,7 @@
 <script>
 const money=n=>new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS',maximumFractionDigits:0}).format(Number(n||0));
 let products=[];
+let cartViewTracked=false;
 const cartEl=document.getElementById('cart');
 
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -80,7 +81,10 @@ function render(){
   const unavailableNotice=hasUnavailable?'<div class="cart-warning">Hay un producto sin stock. Quitalo del carrito para poder continuar al checkout.</div>':'';
   const checkoutClass=hasUnavailable?'checkout-primary blocked':'checkout-primary';
   cartEl.innerHTML=rows+`<div class="summary"><span>${units} ${units===1?'unidad':'unidades'}</span><span>${money(total)}</span></div>${adjustmentNotice}${unavailableNotice}<div class="cart-trust"><span>🔒 Pago protegido</span><span>🚚 Envío con seguimiento</span><span>💬 Atención directa</span></div><button class="btn ${checkoutClass}" type="button" onclick="goCheckout()" ${hasUnavailable?'disabled':''}>CONTINUAR AL CHECKOUT · ${money(total)}</button><a class="btn secondary" href="/#catalogo">SEGUIR COMPRANDO</a><p id="error" class="error"></p>`;
-  window.MitiToysAnalytics?.track('cart_view',{items:units,value:total});
+  if(!cartViewTracked){
+    window.MitiToysAnalytics?.track('cart_view',{items:units,value:total});
+    cartViewTracked=true;
+  }
 }
 
 function changeQty(id,d){
