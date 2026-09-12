@@ -78,7 +78,6 @@
 
   window.agregarAlCarrito = (id, button) => {
     window.MitiToysCart.add(id, 1);
-    window.MitiToysAnalytics?.track('checkout_started', { product_id: String(id), source: 'buy_now' });
 
     if (button) {
       const old = button.textContent;
