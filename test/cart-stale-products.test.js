@@ -9,7 +9,11 @@ const cartPage = fs.readFileSync(path.join(__dirname, '..', 'carrito.html'), 'ut
 test('cart helper can silently prune product ids that are no longer valid', () => {
   assert.match(cartHelper, /prune\(validIds\)/);
   assert.match(cartHelper, /const next = cart\.filter\(item => allowed\.has\(item\.id\)\);/);
-  assert.doesNotMatch(cartHelper, /track\('remove_from_cart'[\s\S]*?prune\(validIds\)/);
+  const pruneStart = cartHelper.indexOf('    prune(validIds) {');
+  const pruneEnd = cartHelper.indexOf('    setQty(id, qty) {', pruneStart);
+  assert.ok(pruneStart >= 0 && pruneEnd > pruneStart);
+  const pruneBlock = cartHelper.slice(pruneStart, pruneEnd);
+  assert.doesNotMatch(pruneBlock, /MitiToysAnalytics|remove_from_cart|add_to_cart/);
 });
 
 test('cart page reconciles stale ids before rendering and checkout', () => {
