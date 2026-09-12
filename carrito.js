@@ -111,28 +111,7 @@
     window.location.href = '/checkout.html?cart=1';
   };
 
-  function addButtonsToExistingCards() {
-    document.querySelectorAll('#catalogo .card').forEach(card => {
-      if (card.querySelector('.cart-add')) return;
-
-      const badge = card.querySelector('.badge');
-      const pay = card.querySelector('.paybtn');
-      if (!badge || !pay) return;
-
-      const id = badge.textContent.replace(/^COD\s*/i, '').trim();
-      if (!id) return;
-
-      const btn = document.createElement('button');
-      btn.className = 'paybtn cart-add';
-      btn.type = 'button';
-      btn.textContent = '🛒 AGREGAR AL CARRITO';
-      btn.onclick = () => window.agregarAlCarrito(id, btn);
-      pay.parentNode.insertBefore(btn, pay);
-    });
-  }
-
   function init() {
-    addButtonsToExistingCards();
     updateBadges();
   }
 
