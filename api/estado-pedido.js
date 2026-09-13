@@ -1,5 +1,4 @@
 const { getDb } = require('../lib/db');
-const { ensureReviewInvites } = require('../lib/notifications');
 const { publicOrderStatus } = require('../lib/order-state');
 const { PREFERENCE_TTL_MS } = require('../lib/payments');
 const {
@@ -72,7 +71,6 @@ module.exports = async (req, res) => {
     order.status = publicOrderStatus(order);
     order.payment_url = safePendingPaymentUrl(order);
     order.payment_status_detail = publicPaymentDetail(order.payment_status_detail);
-    if (order.status === 'delivered') await ensureReviewInvites(sql, order.id);
     const [items, events, reviewInvites] = await Promise.all([
       sql`SELECT product_id,product_title,quantity,unit_price,total_amount FROM order_items WHERE order_id=${order.id} ORDER BY id`,
       sql`SELECT event_type,new_status,payload,created_at FROM order_events WHERE order_id=${order.id} ORDER BY created_at,id`,
