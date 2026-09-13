@@ -27,13 +27,14 @@ test('health exitoso devuelve solo estado mínimo, evita caché del navegador y 
   const res = response();
   await handler({ method: 'GET' }, res);
   assert.equal(res.code, 200);
-  assert.deepEqual(res.body, { ok: true, database: true });
+  assert.deepEqual(res.body, { ok: true });
+  assert.equal('database' in res.body, false);
   assert.equal('server_time' in res.body, false);
   assert.match(query, /SELECT 1 AS ok/);
   assert.equal(res.headers['cache-control'], 'public, max-age=0, s-maxage=15, stale-while-revalidate=30');
 });
 
-test('fallo de base nunca se cachea ni expone el error interno', async t => {
+test('fallo de base nunca se cachea ni expone arquitectura o error interno', async t => {
   const previous = console.error;
   console.error = () => {};
   t.after(() => { console.error = previous; });
@@ -42,5 +43,9 @@ test('fallo de base nunca se cachea ni expone el error interno', async t => {
   await handler({ method: 'GET' }, res);
   assert.equal(res.code, 500);
   assert.equal(res.headers['cache-control'], 'no-store, max-age=0');
-  assert.ok(!JSON.stringify(res.body).includes('private database detail'));
+  assert.deepEqual(res.body, { ok: false, error: 'Servicio temporalmente no disponible.' });
+  const body = JSON.stringify(res.body);
+  assert.ok(!body.includes('private database detail'));
+  assert.ok(!body.toLowerCase().includes('base de datos'));
+  assert.equal('database' in res.body, false);
 });
