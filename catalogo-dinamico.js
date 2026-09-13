@@ -1,6 +1,6 @@
 (() => {
   const CACHE_KEY = 'mititoys_catalog_cache_v4';
-  const CACHE_TTL = 15 * 60 * 1000;
+  const CACHE_TTL = 60 * 1000;
 
   const money = value => new Intl.NumberFormat('es-AR', {
     style: 'currency',
