@@ -34,13 +34,14 @@ test('checkout server no consulta ni publica imágenes binarias de Neon', () => 
   assert.doesNotMatch(checkout, /\/api\/product-image/);
 });
 
-test('API pública de productos no consulta product_images y usa caché CDN corta', () => {
+test('API pública de productos no consulta product_images y usa caché CDN corta sin contenido comercial stale', () => {
   const products = read('api/productos.js');
   assert.doesNotMatch(products, /FROM product_images|JOIN product_images/);
   assert.doesNotMatch(products, /\/api\/product-image/);
   assert.match(products, /max-age=0/);
-  assert.match(products, /s-maxage=60/);
-  assert.match(products, /stale-while-revalidate=60/);
+  assert.match(products, /s-maxage=30/);
+  assert.match(products, /must-revalidate/);
+  assert.doesNotMatch(products, /max-age=0, s-maxage=30, stale-while-revalidate/);
   assert.match(products, /private, no-store/);
 });
 
