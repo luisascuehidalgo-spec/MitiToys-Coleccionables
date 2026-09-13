@@ -59,13 +59,14 @@ test('a different verified order cannot consume a pending checkout cart', () => 
   assert.ok(storage.dump('mititoys_pending_checkout_cart'));
 });
 
-test('order page finalizes only after an authenticated order lookup returns a paid state', () => {
+test('order page finalizes only after an authenticated order lookup returns a paid operational state', () => {
   assert.match(orderPage, /carrito\.js\?v=9/);
-  assert.match(orderPage, /paidStates=new Set\(\['approved','processing','shipped','delivered','refunded'\]\)/);
+  assert.match(orderPage, /paidStates=new Set\(\['approved','processing','shipped','delivered'\]\)/);
   const lookupIndex = orderPage.indexOf("fetch('/api/estado-pedido'");
   const statusIndex = orderPage.indexOf('paidStates.has(o.status)');
   const finalizeIndex = orderPage.indexOf('finalizePendingCheckout(o.items)');
   assert.ok(lookupIndex >= 0 && statusIndex > lookupIndex && finalizeIndex > statusIndex);
   assert.doesNotMatch(orderPage, /paidStates=new Set\([^)]*pending/);
   assert.doesNotMatch(orderPage, /paidStates=new Set\([^)]*cancelled/);
+  assert.doesNotMatch(orderPage, /paidStates=new Set\([^)]*refunded/);
 });
