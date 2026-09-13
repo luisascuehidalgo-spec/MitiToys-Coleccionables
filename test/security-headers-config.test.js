@@ -18,16 +18,17 @@ test('todas las rutas reciben headers de seguridad no disruptivos', () => {
   const headers = headerMap('/(.*)');
   assert.equal(headers['x-content-type-options'], 'nosniff');
   assert.equal(headers['x-frame-options'], 'DENY');
-  assert.equal(headers['content-security-policy'], "base-uri 'self'; object-src 'none'; frame-ancestors 'none'");
+  assert.equal(headers['content-security-policy'], "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
   assert.equal(headers['referrer-policy'], 'strict-origin-when-cross-origin');
   assert.equal(headers['permissions-policy'], 'camera=(), microphone=(), geolocation=()');
 });
 
-test('CSP global protege base, plugins y framing sin restringir recursos actuales', () => {
+test('CSP global protege base, plugins, framing y destinos de formularios sin restringir recursos actuales', () => {
   const csp = headerMap('/(.*)')['content-security-policy'];
   assert.match(csp, /base-uri 'self'/);
   assert.match(csp, /object-src 'none'/);
   assert.match(csp, /frame-ancestors 'none'/);
+  assert.match(csp, /form-action 'self'/);
   assert.doesNotMatch(csp, /script-src|style-src|img-src|connect-src|default-src/);
 });
 
