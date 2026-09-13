@@ -52,6 +52,12 @@
     cart.parentNode.insertBefore(notice, cart);
   }
 
+  function hideEmptyCheckoutMobileCta() {
+    if (!window.location.pathname.endsWith('/checkout.html') || read().length) return;
+    const mobileSubmit = document.getElementById('mobileSubmit');
+    if (mobileSubmit) mobileSubmit.hidden = true;
+  }
+
   async function guardCheckoutStock() {
     if (!window.location.pathname.endsWith('/checkout.html')) return;
     const cart = read();
@@ -165,6 +171,7 @@
   function init() {
     updateBadges();
     showStockNotice();
+    hideEmptyCheckoutMobileCta();
     void guardCheckoutStock();
   }
 
