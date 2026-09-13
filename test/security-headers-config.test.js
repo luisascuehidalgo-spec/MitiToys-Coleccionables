@@ -21,6 +21,14 @@ test('todas las rutas reciben headers de seguridad no disruptivos', () => {
   assert.equal(headers['content-security-policy'], "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
   assert.equal(headers['referrer-policy'], 'strict-origin-when-cross-origin');
   assert.equal(headers['permissions-policy'], 'camera=(), microphone=(), geolocation=()');
+  assert.equal(headers['strict-transport-security'], 'max-age=31536000');
+});
+
+test('HSTS obliga HTTPS por un año sin comprometer subdominios no auditados ni preload', () => {
+  const hsts = headerMap('/(.*)')['strict-transport-security'];
+  assert.equal(hsts, 'max-age=31536000');
+  assert.doesNotMatch(hsts, /includeSubDomains/i);
+  assert.doesNotMatch(hsts, /preload/i);
 });
 
 test('CSP global protege base, plugins, framing y destinos de formularios sin restringir recursos actuales', () => {
