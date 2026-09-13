@@ -12,6 +12,8 @@ const {
 const ADMIN_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const ADMIN_SESSION_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const ADMIN_SESSION_MAX_AGE_SECONDS = Math.floor(ADMIN_SESSION_TTL_MS / 1000);
+const ADMIN_COOKIE_NAME = '__Host-mititoys_admin';
+const LEGACY_ADMIN_COOKIE_NAME = 'mititoys_admin';
 const ADMIN_MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function sign(value, secret = process.env.ADMIN_SESSION_SECRET) {
@@ -105,12 +107,19 @@ function verifyMutationOrigin(req) {
   return origin.protocol === 'https:';
 }
 
+function cookieValue(header, name) {
+  const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(header || '').match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
+  return match?.[1] || '';
+}
+
 function rateLimited(res) {
   res.setHeader('Retry-After', String(ADMIN_LOGIN_LOCK_MINUTES * 60));
   return res.status(429).json({ error: 'Demasiados intentos. Probá nuevamente más tarde.' });
 }
 
 module.exports = async (req, res) => {
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   if (ADMIN_MUTATING_METHODS.has(String(req.method || '').toUpperCase()) && !verifyMutationOrigin(req)) {
     return res.status(403).json({ error: 'Origen de administración no permitido.' });
   }
@@ -157,12 +166,15 @@ module.exports = async (req, res) => {
       return res.status(503).json({ error: 'Administración no disponible temporalmente.' });
     }
 
-    res.setHeader('Set-Cookie', `mititoys_admin=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${ADMIN_SESSION_MAX_AGE_SECONDS}`);
+    res.setHeader('Set-Cookie', `${ADMIN_COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${ADMIN_SESSION_MAX_AGE_SECONDS}`);
     return res.status(200).json({ ok: true });
   }
 
   if (req.method === 'DELETE') {
-    res.setHeader('Set-Cookie', 'mititoys_admin=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0');
+    res.setHeader('Set-Cookie', [
+      `${ADMIN_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`,
+      `${LEGACY_ADMIN_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`
+    ]);
     return res.status(200).json({ ok: true });
   }
 
@@ -174,8 +186,8 @@ module.exports.verify = function verify(req) {
   const secret = String(process.env.ADMIN_SESSION_SECRET || '');
   if (!secret) return false;
   const header = String(req.headers?.cookie || '');
-  const match = header.match(/(?:^|; )mititoys_admin=([^;]+)/);
-  return Boolean(match && verifySessionToken(match[1], secret));
+  const token = cookieValue(header, ADMIN_COOKIE_NAME) || cookieValue(header, LEGACY_ADMIN_COOKIE_NAME);
+  return Boolean(token && verifySessionToken(token, secret));
 };
 
 module.exports.createSessionToken = createSessionToken;
@@ -185,3 +197,5 @@ module.exports.safeEqual = safeEqual;
 module.exports.ADMIN_SESSION_TTL_MS = ADMIN_SESSION_TTL_MS;
 module.exports.ADMIN_SESSION_FUTURE_SKEW_MS = ADMIN_SESSION_FUTURE_SKEW_MS;
 module.exports.ADMIN_SESSION_MAX_AGE_SECONDS = ADMIN_SESSION_MAX_AGE_SECONDS;
+module.exports.ADMIN_COOKIE_NAME = ADMIN_COOKIE_NAME;
+module.exports.LEGACY_ADMIN_COOKIE_NAME = LEGACY_ADMIN_COOKIE_NAME;
