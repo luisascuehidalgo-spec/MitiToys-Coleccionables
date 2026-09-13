@@ -34,6 +34,7 @@ module.exports = async (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
   if (!id) {
+    res.setHeader('X-Robots-Tag', 'noindex, follow');
     res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
     return res.status(200).send(template);
   }
