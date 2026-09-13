@@ -63,7 +63,11 @@ module.exports = async (req, res) => {
       RETURNING id,title,description,images,price,stock_quantity,stock_managed,active,
                 weight_kg,package_length_cm,package_width_cm,package_height_cm,updated_at
     `;
-    if (!rows.length) return res.status(409).json({ error: 'El producto cambió desde que abriste esta pantalla. Actualizá antes de guardar para no sobrescribir datos nuevos.' });
+    if (!rows.length) {
+      const exists = await sql`SELECT id FROM products WHERE id=${id} LIMIT 1`;
+      if (!exists.length) return res.status(404).json({ error: 'Producto no encontrado.' });
+      return res.status(409).json({ error: 'El producto cambió desde que abriste esta pantalla. Actualizá antes de guardar para no sobrescribir datos nuevos.' });
+    }
     return res.status(200).json({ product: rows[0] });
   } catch (error) {
     console.error('admin shipping error:', error?.code || error?.name || 'unknown');
