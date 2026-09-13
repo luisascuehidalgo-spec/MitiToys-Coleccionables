@@ -35,7 +35,7 @@ module.exports = async (req, res) => {
 
   if (!id) {
     res.setHeader('X-Robots-Tag', 'noindex, follow');
-    res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=60');
     return res.status(200).send(template);
   }
 
@@ -53,7 +53,7 @@ module.exports = async (req, res) => {
 
     if (!rows.length) {
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-      res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+      res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=60');
       return res.status(404).send(template);
     }
 
@@ -67,7 +67,7 @@ module.exports = async (req, res) => {
     if (preload) res.setHeader('Link', preload);
     const html = renderProductSeo(template, product)
       .replace('"__MITITOYS_PRODUCT_BOOTSTRAP__"', serializeProductBootstrap(product));
-    res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=60');
     return res.status(200).send(html);
   } catch (error) {
     console.error('product-page error:', 'code=' + String(error?.code || error?.name || 'PRODUCT_PAGE_ERROR'));
