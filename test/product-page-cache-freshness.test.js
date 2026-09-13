@@ -5,8 +5,9 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'product-page.js'), 'utf8');
 
-test('product pages prevent browser staleness and cap CDN stale serving to one minute', () => {
-  const expected = 'public, max-age=0, s-maxage=60, stale-while-revalidate=60';
-  assert.ok(source.split(expected).length - 1 >= 3);
-  assert.doesNotMatch(source, /stale-while-revalidate=300/);
+test('product pages keep commercial price and stock fresh without serving stale CDN responses', () => {
+  const expected = 'public, max-age=0, s-maxage=30, must-revalidate';
+  assert.match(source, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(source, /stale-while-revalidate/);
+  assert.match(source, /PRODUCT_PAGE_CACHE_CONTROL/);
 });
