@@ -2,13 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { neon } = require('@neondatabase/serverless');
 const { supportsAtomicInventoryWrite } = require('../api/admin-product');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'admin-product.js'), 'utf8');
 
-test('Neon-compatible SQL adapters select the atomic inventory path', () => {
-  const neonLike = Object.assign(() => {}, { query() {} });
-  assert.equal(supportsAtomicInventoryWrite(neonLike), true);
+test('the installed Neon HTTP adapter selects the atomic inventory path', () => {
+  const sql = neon('postgresql://user:pass@localhost/test');
+  assert.equal(typeof sql.query, 'function');
+  assert.equal(supportsAtomicInventoryWrite(sql), true);
   assert.equal(supportsAtomicInventoryWrite(async () => {}), false);
 });
 
