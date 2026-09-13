@@ -38,8 +38,9 @@ test('API pública de productos no consulta product_images y usa caché CDN cort
   const products = read('api/productos.js');
   assert.doesNotMatch(products, /FROM product_images|JOIN product_images/);
   assert.doesNotMatch(products, /\/api\/product-image/);
+  assert.match(products, /max-age=0/);
   assert.match(products, /s-maxage=60/);
-  assert.match(products, /stale-while-revalidate=300/);
+  assert.match(products, /stale-while-revalidate=60/);
   assert.match(products, /private, no-store/);
 });
 
