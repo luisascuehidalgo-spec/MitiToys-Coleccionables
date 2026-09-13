@@ -39,14 +39,14 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'La actualización de envíos solo acepta peso y dimensiones.' });
   }
 
-  const expectedVersion = validVersion(body.updated_at);
-  if (!expectedVersion) {
-    return res.status(409).json({ error: 'La versión del producto está desactualizada. Actualizá el panel antes de guardar.' });
-  }
-
   const shipping = parseShipping(body);
   if (!shipping) {
     return res.status(400).json({ error: 'Completá peso, largo, ancho y alto con valores mayores a cero.' });
+  }
+
+  const expectedVersion = validVersion(body.updated_at);
+  if (!expectedVersion) {
+    return res.status(409).json({ error: 'La versión del producto está desactualizada. Actualizá el panel antes de guardar.' });
   }
 
   const sql = getDb();
