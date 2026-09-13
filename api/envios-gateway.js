@@ -6,10 +6,20 @@ const {
   consumeShippingQuoteAttempt
 } = require('../lib/shipping-quote-rate-limit');
 
+function isJsonRequest(req) {
+  return String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase() === 'application/json';
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return shippingHandler(req, res);
 
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  if (!isJsonRequest(req)) {
+    return res.status(415).json({
+      code: 'SHIPPING_QUOTE_JSON_REQUIRED',
+      error: 'Formato de cotización no permitido.'
+    });
+  }
 
   try {
     const ipHash = shippingQuoteRateKey(req, process.env.ADMIN_SESSION_SECRET);
@@ -29,3 +39,5 @@ module.exports = async (req, res) => {
 
   return shippingHandler(req, res);
 };
+
+module.exports.isJsonRequest = isJsonRequest;
