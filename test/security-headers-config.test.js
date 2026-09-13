@@ -40,6 +40,15 @@ test('CSP global protege base, plugins, framing y destinos de formularios sin re
   assert.doesNotMatch(csp, /script-src|style-src|img-src|connect-src|default-src/);
 });
 
+test('páginas con identificadores sensibles no filtran la URL mediante Referer', () => {
+  for (const source of ['/pedido.html', '/opinar.html']) {
+    const headers = headerMap(source);
+    assert.equal(headers['referrer-policy'], 'no-referrer', source);
+    assert.equal(headers['cache-control'], 'private, no-store, max-age=0', source);
+    assert.equal(headers['x-robots-tag'], 'noindex, nofollow, noarchive', source);
+  }
+});
+
 test('paneles admin no se cachean ni indexan', () => {
   for (const source of ['/admin.html', '/admin-envios.html']) {
     const headers = headerMap(source);
