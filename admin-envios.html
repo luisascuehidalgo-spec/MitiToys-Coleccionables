@@ -30,7 +30,7 @@
     let products = [];
     const BACKUP_KEY = 'mititoys_shipping_backup_v1';
     const SHIPPING_FIELDS = ['weight_kg','package_length_cm','package_width_cm','package_height_cm'];
-    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[char]));
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;' }[char]));
     const value = id => document.getElementById(id)?.value || '';
     const numberOrNull = id => Number(value(id)) > 0 ? Number(value(id)) : null;
 
@@ -133,7 +133,7 @@
       };
       if (!Object.values(shipping).every(Boolean)) { state.className = 'bad'; state.textContent = 'Completá los cuatro valores con números mayores a cero.'; return; }
       state.className = 'muted'; state.textContent = 'Guardando...';
-      const response = await fetch('/api/admin-shipping', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:product.id, ...shipping }) });
+      const response = await fetch('/api/admin-shipping', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:product.id, updated_at:product.updated_at, ...shipping }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) { state.className = 'bad'; state.textContent = data.error || 'No se pudo guardar.'; return; }
       saveBackup(id, shipping);
