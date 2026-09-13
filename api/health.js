@@ -5,7 +5,7 @@ module.exports = async (req, res) => {
   try {
     const sql = getDb();
     await sql`SELECT 1 AS ok`;
-    res.setHeader('Cache-Control', 'public, s-maxage=15, stale-while-revalidate=30');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=15, stale-while-revalidate=30');
     return res.status(200).json({ ok: true, database: true });
   } catch (error) {
     console.error('health error:', 'code=' + String(error?.code || error?.name || 'HEALTH_CHECK_FAILED'));
