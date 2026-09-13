@@ -21,7 +21,7 @@ function productImagePreload(images) {
   if (!first) return '';
   try {
     const url = new URL(String(first));
-    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    if (url.protocol !== 'https:') return '';
     return `<${url.href}>; rel=preload; as=image`;
   } catch (_) {
     return '';
