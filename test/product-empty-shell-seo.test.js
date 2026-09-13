@@ -22,7 +22,9 @@ test('product shell without id is not indexable', async () => {
   const res = await call('/producto.html');
   assert.equal(res.code, 200);
   assert.equal(res.headers['x-robots-tag'], 'noindex, follow');
-  assert.match(res.headers['cache-control'], /s-maxage=60/);
+  assert.match(res.headers['cache-control'], /s-maxage=30/);
+  assert.match(res.headers['cache-control'], /must-revalidate/);
+  assert.doesNotMatch(res.headers['cache-control'], /stale-while-revalidate/);
 });
 
 test('valid product detail remains indexable', async () => {
@@ -40,5 +42,8 @@ test('valid product detail remains indexable', async () => {
   const res = await call('/producto.html?id=3142');
   assert.equal(res.code, 200);
   assert.equal(res.headers['x-robots-tag'], undefined);
+  assert.match(res.headers['cache-control'], /s-maxage=30/);
+  assert.match(res.headers['cache-control'], /must-revalidate/);
+  assert.doesNotMatch(res.headers['cache-control'], /stale-while-revalidate/);
   assert.match(res.body, /Producto QA/);
 });
