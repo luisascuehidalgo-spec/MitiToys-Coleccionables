@@ -132,7 +132,7 @@ module.exports = async (req, res) => {
       images: Array.isArray(product.images) ? product.images.filter(Boolean).slice(0, imageLimit) : []
     }));
     const reviews = reviewsPromise ? await reviewsPromise : [];
-    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=300');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=60');
     return res.status(200).json({ products: result, reviews });
   } catch (error) {
     console.error('products api error:', 'code=' + String(error?.code || error?.name || 'PRODUCTS_API_FAILED'));
