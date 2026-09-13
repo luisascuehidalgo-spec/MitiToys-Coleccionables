@@ -5,9 +5,10 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'productos.js'), 'utf8');
 
-test('catalog price and stock responses avoid browser caching and cap CDN stale serving to one minute', () => {
-  assert.match(source, /public, max-age=0, s-maxage=60, stale-while-revalidate=60/);
-  assert.doesNotMatch(source, /public, max-age=0, s-maxage=60, stale-while-revalidate=300/);
+test('catalog price and stock responses revalidate after a short CDN cache window without stale serving', () => {
+  assert.match(source, /public, max-age=0, s-maxage=30, must-revalidate/);
+  assert.doesNotMatch(source, /public, max-age=0, s-maxage=30, stale-while-revalidate/i);
+  assert.doesNotMatch(source, /public, max-age=0, s-maxage=60, stale-while-revalidate=60/);
 });
 
 test('long sitemap cache remains independent from commercial catalog freshness', () => {
