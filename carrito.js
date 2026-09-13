@@ -1,6 +1,8 @@
 (() => {
   const KEY = 'mititoys_cart';
   const STOCK_NOTICE_KEY = 'mititoys_cart_stock_notice';
+  const PENDING_CHECKOUT_KEY = 'mititoys_pending_checkout_cart';
+  const PENDING_CHECKOUT_TTL = 24 * 60 * 60 * 1000;
 
   const read = () => {
     try {
@@ -16,6 +18,43 @@
   };
 
   const save = cart => localStorage.setItem(KEY, JSON.stringify(cart));
+
+  const normalizeItems = items => Array.isArray(items)
+    ? items
+        .map(item => ({ id: String(item?.id ?? item?.product_id ?? ''), qty: Math.max(0, Math.floor(Number(item?.qty ?? item?.quantity) || 0)) }))
+        .filter(item => item.id && item.qty > 0)
+        .sort((a, b) => a.id.localeCompare(b.id))
+    : [];
+
+  function sameItems(left, right) {
+    const a = normalizeItems(left);
+    const b = normalizeItems(right);
+    return a.length === b.length && a.every((item, index) => item.id === b[index].id && item.qty === b[index].qty);
+  }
+
+  function rememberPendingCheckout(cart) {
+    const items = normalizeItems(cart);
+    if (!items.length) return;
+    try {
+      localStorage.setItem(PENDING_CHECKOUT_KEY, JSON.stringify({ savedAt: Date.now(), items }));
+    } catch (_) {
+      // Checkout remains usable when browser storage is unavailable.
+    }
+  }
+
+  function readPendingCheckout() {
+    try {
+      const pending = JSON.parse(localStorage.getItem(PENDING_CHECKOUT_KEY) || 'null');
+      if (!pending || !Array.isArray(pending.items) || !Number.isFinite(Number(pending.savedAt))) return null;
+      if (Date.now() - Number(pending.savedAt) > PENDING_CHECKOUT_TTL) {
+        localStorage.removeItem(PENDING_CHECKOUT_KEY);
+        return null;
+      }
+      return { savedAt: Number(pending.savedAt), items: normalizeItems(pending.items) };
+    } catch (_) {
+      return null;
+    }
+  }
 
   const updateBadges = () => {
     const count = read().reduce((n, x) => n + x.qty, 0);
@@ -140,8 +179,28 @@
       return cart;
     },
     clear() {
+      const cart = read();
+      if (window.location.pathname.endsWith('/checkout.html') && cart.length) {
+        rememberPendingCheckout(cart);
+        return cart;
+      }
       save([]);
       updateBadges();
+      return [];
+    },
+    finalizePendingCheckout(verifiedItems) {
+      const pending = readPendingCheckout();
+      if (!pending || !sameItems(pending.items, verifiedItems)) return false;
+
+      const current = read();
+      const purchased = new Map(pending.items.map(item => [item.id, item.qty]));
+      const next = current
+        .map(item => ({ ...item, qty: item.qty - Number(purchased.get(item.id) || 0) }))
+        .filter(item => item.qty > 0);
+      try { localStorage.removeItem(PENDING_CHECKOUT_KEY); } catch (_) {}
+      save(next);
+      updateBadges();
+      return true;
     }
   };
 
