@@ -6,6 +6,7 @@ const { renderProductSeo } = require('../lib/product-page-seo');
 
 const template = fs.readFileSync(path.join(__dirname, '..', 'templates', 'producto.html'), 'utf8');
 const clean = (value, max = 80) => String(value || '').trim().slice(0, max);
+const PRODUCT_PAGE_CACHE_CONTROL = 'public, max-age=0, s-maxage=30, must-revalidate';
 
 function serializeProductBootstrap(product) {
   return JSON.stringify(product)
@@ -35,7 +36,7 @@ module.exports = async (req, res) => {
 
   if (!id) {
     res.setHeader('X-Robots-Tag', 'noindex, follow');
-    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=60');
+    res.setHeader('Cache-Control', PRODUCT_PAGE_CACHE_CONTROL);
     return res.status(200).send(template);
   }
 
@@ -53,7 +54,7 @@ module.exports = async (req, res) => {
 
     if (!rows.length) {
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-      res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=60');
+      res.setHeader('Cache-Control', PRODUCT_PAGE_CACHE_CONTROL);
       return res.status(404).send(template);
     }
 
@@ -67,7 +68,7 @@ module.exports = async (req, res) => {
     if (preload) res.setHeader('Link', preload);
     const html = renderProductSeo(template, product)
       .replace('"__MITITOYS_PRODUCT_BOOTSTRAP__"', serializeProductBootstrap(product));
-    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=60, stale-while-revalidate=60');
+    res.setHeader('Cache-Control', PRODUCT_PAGE_CACHE_CONTROL);
     return res.status(200).send(html);
   } catch (error) {
     console.error('product-page error:', 'code=' + String(error?.code || error?.name || 'PRODUCT_PAGE_ERROR'));
