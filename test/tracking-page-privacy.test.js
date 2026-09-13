@@ -11,10 +11,11 @@ function headerMap(source) {
   return Object.fromEntries(rule.headers.map(header => [header.key.toLowerCase(), header.value]));
 }
 
-test('tracking page is private, non-cacheable and excluded from crawler traversal', () => {
+test('tracking page is private, non-cacheable, crawler-excluded and does not leak order ids in referrers', () => {
   const headers = headerMap('/seguimiento.html');
   assert.equal(headers['cache-control'], 'private, no-store, max-age=0');
   assert.equal(headers['x-robots-tag'], 'noindex, nofollow, noarchive');
+  assert.equal(headers['referrer-policy'], 'no-referrer');
 });
 
 test('public information pages are not accidentally covered by private tracking headers', () => {
