@@ -6,10 +6,20 @@ const {
   consumeCheckoutAttempt
 } = require('../lib/checkout-rate-limit');
 
+function isJsonRequest(req) {
+  return String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase() === 'application/json';
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return checkoutHandler(req, res);
 
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  if (!isJsonRequest(req)) {
+    return res.status(415).json({
+      code: 'CHECKOUT_JSON_REQUIRED',
+      error: 'Formato de checkout no permitido.'
+    });
+  }
 
   try {
     const ipHash = checkoutRateKey(req, process.env.ADMIN_SESSION_SECRET);
@@ -29,3 +39,5 @@ module.exports = async (req, res) => {
 
   return checkoutHandler(req, res);
 };
+
+module.exports.isJsonRequest = isJsonRequest;
