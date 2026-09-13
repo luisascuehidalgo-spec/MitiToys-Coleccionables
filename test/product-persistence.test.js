@@ -138,14 +138,19 @@ function shippingDb(initial) {
   query = async (strings, ...values) => {
     const sql = strings.join('?').replace(/\s+/g, ' ').trim();
     calls.push({ sql, values: clone(values) });
+    if (sql.startsWith('SELECT id FROM products')) {
+      return String(values[0]) === String(state.id) ? [{ id: state.id }] : [];
+    }
     if (!sql.startsWith('UPDATE products SET weight_kg=')) throw new Error('Unexpected SQL: ' + sql);
     if (String(values[4]) !== String(state.id)) return [];
+    if (!sameMillisecond(state.updated_at, values[5])) return [];
     state = {
       ...state,
       weight_kg: values[0],
       package_length_cm: values[1],
       package_width_cm: values[2],
-      package_height_cm: values[3]
+      package_height_cm: values[3],
+      updated_at: '2026-09-07T18:01:00.456Z'
     };
     return [clone(state)];
   };
@@ -284,6 +289,7 @@ test('E: endpoint de logística actualiza solo las cuatro columnas logísticas',
   const db = shippingDb(initial);
   const res = await call(shippingHandler, 'PATCH', {
     id: initial.id,
+    updated_at: initial.updated_at,
     weight_kg: 1.5,
     package_length_cm: 31,
     package_width_cm: 26,
@@ -304,13 +310,14 @@ test('E: endpoint de logística actualiza solo las cuatro columnas logísticas',
   }
 });
 
-test('H: una pestaña vieja de envíos no puede sobrescribir imágenes nuevas', async t => {
+test('H: una pestaña de envíos no sobrescribe imágenes nuevas cuando guarda la versión actual', async t => {
   setupAuth(t);
   const initial = baseProduct();
   const db = shippingDb({ ...initial, images: [A, B, C] });
 
   const res = await call(shippingHandler, 'PATCH', {
     id: initial.id,
+    updated_at: initial.updated_at,
     weight_kg: 1.75,
     package_length_cm: 32,
     package_width_cm: 27,
@@ -322,6 +329,7 @@ test('H: una pestaña vieja de envíos no puede sobrescribir imágenes nuevas', 
   const callsBefore = db.calls.length;
   const rejected = await call(shippingHandler, 'PATCH', {
     id: initial.id,
+    updated_at: db.getState().updated_at,
     weight_kg: 1.8,
     package_length_cm: 33,
     package_width_cm: 28,
@@ -331,6 +339,31 @@ test('H: una pestaña vieja de envíos no puede sobrescribir imágenes nuevas', 
   assert.equal(rejected.code, 400);
   assert.equal(db.calls.length, callsBefore);
   assert.deepEqual(db.getState().images, [A, B, C]);
+});
+
+test('H2: una pestaña vieja de envíos no puede sobrescribir medidas nuevas', async t => {
+  setupAuth(t);
+  const initial = baseProduct();
+  const newer = {
+    ...initial,
+    weight_kg: 2.1,
+    package_length_cm: 40,
+    package_width_cm: 30,
+    package_height_cm: 45,
+    updated_at: '2026-09-07T18:05:00.999Z'
+  };
+  const db = shippingDb(newer);
+  const res = await call(shippingHandler, 'PATCH', {
+    id: initial.id,
+    updated_at: initial.updated_at,
+    weight_kg: 1.8,
+    package_length_cm: 33,
+    package_width_cm: 28,
+    package_height_cm: 38
+  });
+  assert.equal(res.code, 409);
+  assert.match(res.body.error, /cambió desde que abriste esta pantalla/i);
+  assert.deepEqual(db.getState(), newer);
 });
 
 test('shipping PATCH exige los cuatro valores y rechaza null explícito', async t => {
@@ -387,7 +420,7 @@ function enviosContext(fetchImpl) {
   return { context, get };
 }
 
-test('admin-envios envía exclusivamente id + logística al endpoint aislado', async () => {
+test('admin-envios envía id + versión + logística al endpoint aislado', async () => {
   let patchPayload;
   const initial = baseProduct();
   const { context, get } = enviosContext(async (path, options = {}) => {
@@ -414,9 +447,11 @@ test('admin-envios envía exclusivamente id + logística al endpoint aislado', a
     'package_height_cm',
     'package_length_cm',
     'package_width_cm',
+    'updated_at',
     'weight_kg'
   ].sort());
   assert.equal(patchPayload.id, initial.id);
+  assert.equal(patchPayload.updated_at, initial.updated_at);
   assert.equal(patchPayload.weight_kg, 1.5);
   assert.equal(patchPayload.package_length_cm, 31);
   assert.equal(patchPayload.package_width_cm, 26);

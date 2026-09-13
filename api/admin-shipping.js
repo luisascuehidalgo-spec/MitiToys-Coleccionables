@@ -2,10 +2,15 @@ const { getDb } = require('../lib/db');
 const { verify } = require('./admin-auth');
 
 const SHIPPING_FIELDS = ['weight_kg', 'package_length_cm', 'package_width_cm', 'package_height_cm'];
-const ALLOWED_FIELDS = new Set(['id', ...SHIPPING_FIELDS]);
+const ALLOWED_FIELDS = new Set(['id', 'updated_at', ...SHIPPING_FIELDS]);
 
 function clean(value, max) {
   return String(value ?? '').trim().slice(0, max);
+}
+
+function validVersion(value) {
+  const version = clean(value, 80);
+  return version && Number.isFinite(Date.parse(version)) ? version : '';
 }
 
 function parseShipping(body) {
@@ -39,6 +44,11 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Completá peso, largo, ancho y alto con valores mayores a cero.' });
   }
 
+  const expectedVersion = validVersion(body.updated_at);
+  if (!expectedVersion) {
+    return res.status(409).json({ error: 'La versión del producto está desactualizada. Actualizá el panel antes de guardar.' });
+  }
+
   const sql = getDb();
   try {
     const rows = await sql`
@@ -49,10 +59,15 @@ module.exports = async (req, res) => {
           package_height_cm=${shipping.package_height_cm},
           updated_at=NOW()
       WHERE id=${id}
+        AND date_trunc('milliseconds',updated_at)=date_trunc('milliseconds',${expectedVersion}::timestamptz)
       RETURNING id,title,description,images,price,stock_quantity,stock_managed,active,
                 weight_kg,package_length_cm,package_width_cm,package_height_cm,updated_at
     `;
-    if (!rows.length) return res.status(404).json({ error: 'Producto no encontrado.' });
+    if (!rows.length) {
+      const exists = await sql`SELECT id FROM products WHERE id=${id} LIMIT 1`;
+      if (!exists.length) return res.status(404).json({ error: 'Producto no encontrado.' });
+      return res.status(409).json({ error: 'El producto cambió desde que abriste esta pantalla. Actualizá antes de guardar para no sobrescribir datos nuevos.' });
+    }
     return res.status(200).json({ product: rows[0] });
   } catch (error) {
     console.error('admin shipping error:', error?.code || error?.name || 'unknown');

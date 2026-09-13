@@ -133,7 +133,7 @@
       };
       if (!Object.values(shipping).every(Boolean)) { state.className = 'bad'; state.textContent = 'Completá los cuatro valores con números mayores a cero.'; return; }
       state.className = 'muted'; state.textContent = 'Guardando...';
-      const response = await fetch('/api/admin-shipping', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:product.id, ...shipping }) });
+      const response = await fetch('/api/admin-shipping', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ id:product.id, updated_at:product.updated_at, ...shipping }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) { state.className = 'bad'; state.textContent = data.error || 'No se pudo guardar.'; return; }
       saveBackup(id, shipping);
