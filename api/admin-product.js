@@ -37,6 +37,10 @@ function validVersion(value) {
   return version && Number.isFinite(Date.parse(version)) ? version : '';
 }
 
+function supportsAtomicInventoryWrite(sql) {
+  return typeof sql?.query === 'function';
+}
+
 module.exports = async (req, res) => {
   if (!verify(req)) return res.status(401).json({ error: 'No autorizado.' });
   const sql = getDb();
@@ -56,8 +60,26 @@ module.exports = async (req, res) => {
       }
       const exists = await sql`SELECT id FROM products WHERE id=${id}`;
       if (exists.length) return res.status(409).json({ error: 'Ese COD ya existe.' });
-      const rows = await sql`INSERT INTO products(id,title,description,images,price,stock_quantity,stock_managed,active,weight_kg,package_length_cm,package_width_cm,package_height_cm,created_at,updated_at) VALUES(${id},${title},${description},${JSON.stringify(images)}::jsonb,${price},${stock},${stockManaged},${active},${shipping.weight_kg},${shipping.package_length_cm},${shipping.package_width_cm},${shipping.package_height_cm},NOW(),NOW()) RETURNING *`;
-      if (stock !== 0) await sql`INSERT INTO inventory_movements(product_id,movement_type,quantity,reason) VALUES(${id},'adjustment',${stock},'Stock inicial desde panel de administración')`;
+      let rows;
+      if (supportsAtomicInventoryWrite(sql)) {
+        rows = await sql`
+          WITH inserted AS (
+            INSERT INTO products(id,title,description,images,price,stock_quantity,stock_managed,active,weight_kg,package_length_cm,package_width_cm,package_height_cm,created_at,updated_at)
+            VALUES(${id},${title},${description},${JSON.stringify(images)}::jsonb,${price},${stock},${stockManaged},${active},${shipping.weight_kg},${shipping.package_length_cm},${shipping.package_width_cm},${shipping.package_height_cm},NOW(),NOW())
+            RETURNING *
+          ), inventory_write AS (
+            INSERT INTO inventory_movements(product_id,movement_type,quantity,reason)
+            SELECT id,'adjustment',${stock},'Stock inicial desde panel de administración'
+            FROM inserted
+            WHERE ${stock} <> 0
+            RETURNING 1
+          )
+          SELECT * FROM inserted
+        `;
+      } else {
+        rows = await sql`INSERT INTO products(id,title,description,images,price,stock_quantity,stock_managed,active,weight_kg,package_length_cm,package_width_cm,package_height_cm,created_at,updated_at) VALUES(${id},${title},${description},${JSON.stringify(images)}::jsonb,${price},${stock},${stockManaged},${active},${shipping.weight_kg},${shipping.package_length_cm},${shipping.package_width_cm},${shipping.package_height_cm},NOW(),NOW()) RETURNING *`;
+        if (stock !== 0) await sql`INSERT INTO inventory_movements(product_id,movement_type,quantity,reason) VALUES(${id},'adjustment',${stock},'Stock inicial desde panel de administración')`;
+      }
       return res.status(201).json({ product: rows[0] });
     }
     if (req.method === 'PUT') {
@@ -79,19 +101,43 @@ module.exports = async (req, res) => {
       const uploaded = await sql`SELECT COUNT(*)::int AS count FROM product_images WHERE product_id=${id}`;
       if (images.length + Number(uploaded[0]?.count || 0) > 8) return res.status(400).json({ error: 'Este producto supera el máximo de 8 fotos.' });
       const delta = stock - Number(current[0].stock_quantity);
-      const rows = await sql`
-        UPDATE products SET
-          title=${title},description=${description},images=${JSON.stringify(images)}::jsonb,
-          stock_quantity=${stock},stock_managed=${managed},active=${active},price=${price},
-          weight_kg=${shipping.weight_kg},package_length_cm=${shipping.package_length_cm},
-          package_width_cm=${shipping.package_width_cm},package_height_cm=${shipping.package_height_cm},updated_at=NOW()
-        WHERE id=${id}
-          AND date_trunc('milliseconds',updated_at)=date_trunc('milliseconds',${expectedVersion}::timestamptz)
-          AND COALESCE(images,'[]'::jsonb)=${JSON.stringify(originalImages)}::jsonb
-        RETURNING *
-      `;
+      let rows;
+      if (supportsAtomicInventoryWrite(sql)) {
+        rows = await sql`
+          WITH updated AS (
+            UPDATE products SET
+              title=${title},description=${description},images=${JSON.stringify(images)}::jsonb,
+              stock_quantity=${stock},stock_managed=${managed},active=${active},price=${price},
+              weight_kg=${shipping.weight_kg},package_length_cm=${shipping.package_length_cm},
+              package_width_cm=${shipping.package_width_cm},package_height_cm=${shipping.package_height_cm},updated_at=NOW()
+            WHERE id=${id}
+              AND date_trunc('milliseconds',updated_at)=date_trunc('milliseconds',${expectedVersion}::timestamptz)
+              AND COALESCE(images,'[]'::jsonb)=${JSON.stringify(originalImages)}::jsonb
+            RETURNING *
+          ), inventory_write AS (
+            INSERT INTO inventory_movements(product_id,movement_type,quantity,reason)
+            SELECT id,'adjustment',${delta},'Ajuste desde panel de administración'
+            FROM updated
+            WHERE ${delta} <> 0
+            RETURNING 1
+          )
+          SELECT * FROM updated
+        `;
+      } else {
+        rows = await sql`
+          UPDATE products SET
+            title=${title},description=${description},images=${JSON.stringify(images)}::jsonb,
+            stock_quantity=${stock},stock_managed=${managed},active=${active},price=${price},
+            weight_kg=${shipping.weight_kg},package_length_cm=${shipping.package_length_cm},
+            package_width_cm=${shipping.package_width_cm},package_height_cm=${shipping.package_height_cm},updated_at=NOW()
+          WHERE id=${id}
+            AND date_trunc('milliseconds',updated_at)=date_trunc('milliseconds',${expectedVersion}::timestamptz)
+            AND COALESCE(images,'[]'::jsonb)=${JSON.stringify(originalImages)}::jsonb
+          RETURNING *
+        `;
+      }
       if (!rows.length) return res.status(409).json({ error: 'El producto cambió desde que abriste el panel. Actualizá antes de guardar para no sobrescribir cambios.' });
-      if (delta !== 0) await sql`INSERT INTO inventory_movements(product_id,movement_type,quantity,reason) VALUES(${id},'adjustment',${delta},'Ajuste desde panel de administración')`;
+      if (!supportsAtomicInventoryWrite(sql) && delta !== 0) await sql`INSERT INTO inventory_movements(product_id,movement_type,quantity,reason) VALUES(${id},'adjustment',${delta},'Ajuste desde panel de administración')`;
       return res.status(200).json({ product: rows[0] });
     }
     return res.status(405).json({ error: 'Método no permitido.' });
@@ -100,3 +146,5 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'No se pudo guardar el producto.' });
   }
 };
+
+module.exports.supportsAtomicInventoryWrite = supportsAtomicInventoryWrite;
