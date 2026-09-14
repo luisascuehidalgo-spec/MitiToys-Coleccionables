@@ -34,6 +34,18 @@ test('health exitoso devuelve solo estado mínimo y nunca se cachea', async () =
   assert.equal(res.headers['cache-control'], 'no-store, max-age=0');
 });
 
+test('métodos no permitidos nunca se cachean y anuncian GET', async () => {
+  let dbCalls = 0;
+  const handler = loadHandler(async () => { dbCalls += 1; return [{ ok: 1 }]; });
+  const res = response();
+  await handler({ method: 'POST' }, res);
+  assert.equal(res.code, 405);
+  assert.deepEqual(res.body, { error: 'Método no permitido' });
+  assert.equal(res.headers['cache-control'], 'no-store, max-age=0');
+  assert.equal(res.headers.allow, 'GET');
+  assert.equal(dbCalls, 0);
+});
+
 test('fallo de base nunca se cachea ni expone arquitectura o error interno', async t => {
   const previous = console.error;
   console.error = () => {};
