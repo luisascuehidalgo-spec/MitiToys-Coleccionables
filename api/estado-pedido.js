@@ -60,7 +60,10 @@ function publicPaymentDetail(detail) {
 
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
   if (!validBrowserOrigin(req)) return res.status(403).json({ error: 'Origen de consulta no permitido.' });
   const contentType = String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (contentType !== 'application/json') return res.status(415).json({ error: 'Formato de consulta no permitido.' });

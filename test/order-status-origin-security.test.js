@@ -50,3 +50,14 @@ test('origin rejection happens before database and rate-limit work', () => {
   assert.ok(database > guard);
   assert.ok(rateLimit > guard);
 });
+
+test('unsupported order status methods advertise POST without reaching database work', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'estado-pedido.js'), 'utf8');
+  const methodGuard = source.indexOf("if (req.method !== 'POST')");
+  const allowHeader = source.indexOf("res.setHeader('Allow', 'POST')", methodGuard);
+  const database = source.indexOf('const sql = getDb()');
+  assert.ok(methodGuard >= 0);
+  assert.ok(allowHeader > methodGuard);
+  assert.ok(database > allowHeader);
+  assert.match(source, /Cache-Control', 'private, no-store, max-age=0'/);
+});
