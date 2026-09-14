@@ -101,24 +101,10 @@ module.exports = async (req, res) => {
     const deliveryAddress = shipping?.destination_type === 'branch' ? clean(shipping.branch_address, 220) : (homeAddress || clean(customer.address, 220));
     const deliveryCity = shipping?.destination_type === 'branch' ? clean(shipping.destination_locality_name, 100) : clean(customer.city, 100);
 
-    const customerRows = await sql`
-      INSERT INTO customers(name,email,phone,address,city,province,postal_code)
-      VALUES(${clean(customer.name, 120) || 'Cliente'},${email},${clean(customer.phone, 50) || null},${deliveryAddress || null},${deliveryCity || null},${provinceName},${finalPostalCode})
-      ON CONFLICT(email) DO UPDATE SET
-        name=EXCLUDED.name,
-        phone=COALESCE(EXCLUDED.phone,customers.phone),
-        address=COALESCE(EXCLUDED.address,customers.address),
-        city=COALESCE(EXCLUDED.city,customers.city),
-        province=COALESCE(EXCLUDED.province,customers.province),
-        postal_code=COALESCE(EXCLUDED.postal_code,customers.postal_code)
-      RETURNING id
-    `;
-    const customerId = customerRows[0].id;
-
     orderId = await allocateOrderId(sql);
     const localCheckout = await persistCheckoutLocal(sql, {
       orderId,
-      customerId,
+      customerEmail: email,
       items,
       subtotal,
       shippingAmount,
