@@ -178,6 +178,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: true });
   }
 
+  res.setHeader('Allow', 'POST, DELETE');
   return res.status(405).json({ error: 'Método no permitido' });
 };
 
