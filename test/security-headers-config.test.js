@@ -49,11 +49,12 @@ test('páginas con identificadores sensibles no filtran la URL mediante Referer'
   }
 });
 
-test('paneles admin no se cachean ni indexan', () => {
+test('paneles admin no se cachean, indexan ni filtran su URL mediante Referer', () => {
   for (const source of ['/admin.html', '/admin-envios.html']) {
     const headers = headerMap(source);
-    assert.equal(headers['cache-control'], 'private, no-store, max-age=0');
-    assert.equal(headers['x-robots-tag'], 'noindex, nofollow, noarchive');
+    assert.equal(headers['cache-control'], 'private, no-store, max-age=0', source);
+    assert.equal(headers['x-robots-tag'], 'noindex, nofollow, noarchive', source);
+    assert.equal(headers['referrer-policy'], 'no-referrer', source);
   }
 });
 
