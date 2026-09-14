@@ -41,7 +41,8 @@ test('public shipping route is gated before Enviopack and GET behavior remains d
     source: '/api/envios',
     destination: '/api/envios-gateway'
   });
-  assert.match(gatewaySource, /if \(req\.method !== 'POST'\) return shippingHandler\(req, res\)/);
+  assert.match(gatewaySource, /if \(req\.method !== 'POST'\) \{/);
+  assert.match(gatewaySource, /if \(req\.method === 'GET'\) return shippingHandler\(req, res\);/);
   assert.match(gatewaySource, /consumeShippingQuoteAttempt\(getDb\(\), ipHash\)/);
   assert.match(gatewaySource, /res\.status\(429\)/);
   assert.match(gatewaySource, /Retry-After/);
