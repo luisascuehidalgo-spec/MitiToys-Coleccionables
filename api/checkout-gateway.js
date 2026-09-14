@@ -47,9 +47,12 @@ function isAllowedCheckoutOrigin(req) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') return checkoutHandler(req, res);
-
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
+
   if (!isAllowedCheckoutOrigin(req)) {
     return res.status(403).json({
       code: 'CHECKOUT_ORIGIN_NOT_ALLOWED',
