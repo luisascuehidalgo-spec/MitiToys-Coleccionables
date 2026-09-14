@@ -11,10 +11,17 @@ const catalogDescription = value => String(value || '')
   .slice(0, 240);
 
 module.exports = async (req, res) => {
+  const method = String(req.method || '').toUpperCase();
+  if (method !== 'GET' && method !== 'POST') {
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Método no permitido.' });
+  }
+
   const query = searchParams(req);
   const sql = getDb();
   try {
-    if (req.method === 'POST') {
+    if (method === 'POST') {
       res.setHeader('Cache-Control', 'private, no-store, max-age=0');
       const contentType = String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
       if (contentType !== 'application/json') return res.status(415).json({ error: 'Formato no permitido.' });
@@ -78,7 +85,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({ ok: true, review: rows[0] });
     }
 
-    if (req.method === 'GET' && query.get('sitemap')) {
+    if (method === 'GET' && query.get('sitemap')) {
       const products = await sql`SELECT id,updated_at FROM products WHERE active=true ORDER BY updated_at DESC`;
       const staticUrls = [
         ['https://mititoys.com/', '1.0'],
@@ -96,7 +103,6 @@ module.exports = async (req, res) => {
       return res.status(200).send(xml);
     }
 
-    if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido.' });
     const productId = clean(query.get('id'), 50);
     const reviewsPromise = productId
       ? sql`
