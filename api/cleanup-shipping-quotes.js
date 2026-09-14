@@ -2,7 +2,10 @@ const { getDb } = require('../lib/db');
 
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido.' });
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ error: 'Método no permitido.' });
+  }
   if (!process.env.CRON_SECRET || req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'No autorizado.' });
   }
