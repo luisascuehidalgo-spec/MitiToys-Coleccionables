@@ -18,3 +18,14 @@ test('maintenance cleanup remains cron-authenticated and non-cacheable', () => {
   assert.match(source, /private, no-store, max-age=0/);
   assert.doesNotMatch(source, /DELETE FROM orders|DELETE FROM customers|DELETE FROM products/);
 });
+
+test('maintenance cleanup advertises GET on unsupported methods before database access', () => {
+  const methodGuardIndex = source.indexOf("if (req.method !== 'GET')");
+  const allowIndex = source.indexOf("res.setHeader('Allow', 'GET')");
+  const dbIndex = source.indexOf('const sql = getDb()');
+
+  assert.ok(methodGuardIndex >= 0, 'expected a GET-only method guard');
+  assert.ok(allowIndex > methodGuardIndex, 'expected Allow: GET inside the method guard');
+  assert.ok(dbIndex > allowIndex, 'database access must remain after method rejection');
+  assert.match(source, /status\(405\)/);
+});
