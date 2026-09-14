@@ -47,9 +47,14 @@ function isAllowedShippingOrigin(req) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method !== 'POST') return shippingHandler(req, res);
-
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+
+  if (req.method !== 'POST') {
+    if (req.method === 'GET') return shippingHandler(req, res);
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Método no permitido.' });
+  }
+
   if (!isAllowedShippingOrigin(req)) {
     return res.status(403).json({
       code: 'SHIPPING_ORIGIN_NOT_ALLOWED',
