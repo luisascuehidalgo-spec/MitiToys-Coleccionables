@@ -8,6 +8,34 @@ const {
   recordOrderStatusFailure
 } = require('../lib/order-status-rate-limit');
 
+function firstHeader(value) {
+  return String(value ?? '').split(',')[0].trim();
+}
+
+function validBrowserOrigin(req) {
+  const headers = req?.headers || {};
+  const fetchSite = String(headers['sec-fetch-site'] || '').trim().toLowerCase();
+  if (fetchSite && fetchSite !== 'same-origin') return false;
+
+  const rawOrigin = String(headers.origin || '').trim();
+  if (!rawOrigin) return !fetchSite || fetchSite === 'same-origin';
+  if (rawOrigin === 'null') return false;
+
+  let origin;
+  try {
+    origin = new URL(rawOrigin);
+  } catch (_) {
+    return false;
+  }
+
+  const host = firstHeader(headers.host).toLowerCase();
+  if (!host || origin.host.toLowerCase() !== host) return false;
+
+  const forwardedProto = firstHeader(headers['x-forwarded-proto']).toLowerCase();
+  if (forwardedProto) return origin.protocol === `${forwardedProto}:`;
+  return origin.protocol === 'https:';
+}
+
 function safePendingPaymentUrl(order) {
   if (order?.status !== 'pending' || String(order?.payment_status || 'pending') !== 'pending') return null;
   if (!order?.payment_url) return null;
@@ -33,6 +61,7 @@ function publicPaymentDetail(detail) {
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
+  if (!validBrowserOrigin(req)) return res.status(403).json({ error: 'Origen de consulta no permitido.' });
   const contentType = String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (contentType !== 'application/json') return res.status(415).json({ error: 'Formato de consulta no permitido.' });
 
@@ -99,3 +128,5 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'No se pudo consultar el pedido.' });
   }
 };
+
+module.exports.validBrowserOrigin = validBrowserOrigin;
