@@ -42,6 +42,7 @@ function supportsAtomicInventoryWrite(sql) {
 }
 
 module.exports = async (req, res) => {
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   if (!verify(req)) return res.status(401).json({ error: 'No autorizado.' });
   const sql = getDb();
   try {
@@ -140,6 +141,7 @@ module.exports = async (req, res) => {
       if (!supportsAtomicInventoryWrite(sql) && delta !== 0) await sql`INSERT INTO inventory_movements(product_id,movement_type,quantity,reason) VALUES(${id},'adjustment',${delta},'Ajuste desde panel de administración')`;
       return res.status(200).json({ product: rows[0] });
     }
+    res.setHeader('Allow', 'POST, PUT');
     return res.status(405).json({ error: 'Método no permitido.' });
   } catch (error) {
     console.error('admin product error:', 'code=' + String(error?.code || error?.name || 'ADMIN_PRODUCT_FAILED'));
