@@ -15,3 +15,9 @@ test('transactional and private utility pages are not cached by browsers or shar
     assert.equal(headerValue(source, 'Cache-Control'), 'private, no-store, max-age=0', `${source} must remain no-store`);
   }
 });
+
+test('cart and checkout do not send referrer information', () => {
+  for (const source of ['/carrito.html', '/checkout.html']) {
+    assert.equal(headerValue(source, 'Referrer-Policy'), 'no-referrer', `${source} must not send referrer data`);
+  }
+});
