@@ -10,17 +10,19 @@ function headerValue(source, name) {
   return rule?.headers?.find(header => header.key.toLowerCase() === name.toLowerCase())?.value || '';
 }
 
-test('non-transactional public static assets revalidate in browsers while Vercel CDN keeps a bounded cache', () => {
-  for (const source of ['/catalogo-dinamico.js', '/catalogo.css', '/analytics.js']) {
+test('non-critical public static assets revalidate in browsers while Vercel CDN keeps a bounded cache', () => {
+  for (const source of ['/catalogo.css', '/analytics.js']) {
     assert.equal(headerValue(source, 'Cache-Control'), 'public, max-age=0, must-revalidate');
     assert.equal(headerValue(source, 'Vercel-CDN-Cache-Control'), 'public, max-age=3600, stale-while-revalidate=86400');
   }
 });
 
-test('cart script must not be served stale because it contains checkout state logic', () => {
-  assert.equal(headerValue('/carrito.js', 'Cache-Control'), 'public, max-age=0, must-revalidate');
-  assert.equal(headerValue('/carrito.js', 'Vercel-CDN-Cache-Control'), 'public, max-age=0, must-revalidate');
-  assert.doesNotMatch(headerValue('/carrito.js', 'Vercel-CDN-Cache-Control'), /stale-while-revalidate/i);
+test('commerce scripts must not be served stale after a deploy', () => {
+  for (const source of ['/carrito.js', '/catalogo-dinamico.js']) {
+    assert.equal(headerValue(source, 'Cache-Control'), 'public, max-age=0, must-revalidate');
+    assert.equal(headerValue(source, 'Vercel-CDN-Cache-Control'), 'public, max-age=0, must-revalidate');
+    assert.doesNotMatch(headerValue(source, 'Vercel-CDN-Cache-Control'), /stale-while-revalidate/i);
+  }
 });
 
 test('admin pages remain no-store', () => {
