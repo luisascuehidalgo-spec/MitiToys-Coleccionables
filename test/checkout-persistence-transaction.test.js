@@ -35,7 +35,7 @@ test('expectedItemsJson conserva producto, cantidad, importes y flag de stock', 
   ]);
 });
 
-test('persistCheckoutLocal hace indivisibles order, quote, items, reservas y guard final', () => {
+test('persistCheckoutLocal hace indivisibles customer, order, quote, items, reservas y guard final', () => {
   const source = read('lib/checkout-persistence.js');
   const start = source.indexOf('async function persistCheckoutLocal');
   const end = source.indexOf('async function cleanupCheckoutLocal', start);
@@ -43,6 +43,10 @@ test('persistCheckoutLocal hace indivisibles order, quote, items, reservas y gua
 
   assert.match(block, /sql\.transaction\(\(txn\) =>/);
   assert.match(block, /isolationMode: 'Serializable'/);
+  assert.match(block, /WITH customer_row AS \(/);
+  assert.match(block, /INSERT INTO customers\(name,email,phone,address,city,province,postal_code\)/);
+  assert.match(block, /ON CONFLICT\(email\) DO UPDATE SET/);
+  assert.match(block, /customer_row\.id/);
   assert.match(block, /INSERT INTO orders/);
   assert.match(block, /UPDATE shipping_quotes SET used_at=NOW\(\),order_id=\$\{orderId\}/);
   assert.match(block, /INSERT INTO order_items/);
@@ -92,11 +96,13 @@ test('cleanup posterior al fallo de Mercado Pago es una sola sentencia con claim
   assert.equal(calls, 1);
 });
 
-test('endpoint delega persistencia y cleanup; no vuelve a escribir esas piezas por separado', () => {
+test('endpoint delega persistencia del cliente y checkout; no deja PII escrita fuera de la transacción local', () => {
   const api = read('api/crear-preferencia-carrito.js');
   assert.match(api, /allocateOrderId/);
   assert.match(api, /persistCheckoutLocal/);
+  assert.match(api, /customerEmail: email/);
   assert.match(api, /cleanupCheckoutLocal/);
+  assert.doesNotMatch(api, /INSERT INTO customers/);
   assert.doesNotMatch(api, /MITITOYS-PENDING/);
   assert.doesNotMatch(api, /INSERT INTO order_items/);
   assert.doesNotMatch(api, /reserveStock\(sql/);
