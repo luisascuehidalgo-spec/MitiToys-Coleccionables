@@ -7,6 +7,7 @@ const { renderProductSeo } = require('../lib/product-page-seo');
 const template = fs.readFileSync(path.join(__dirname, '..', 'templates', 'producto.html'), 'utf8');
 const clean = (value, max = 80) => String(value || '').trim().slice(0, max);
 const PRODUCT_PAGE_CACHE_CONTROL = 'public, max-age=0, s-maxage=30, must-revalidate';
+const PRODUCT_PAGE_ERROR_CACHE_CONTROL = 'private, no-store, max-age=0';
 
 function serializeProductBootstrap(product) {
   return JSON.stringify(product)
@@ -30,7 +31,11 @@ function productImagePreload(images) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method !== 'GET') return res.status(405).send('Método no permitido');
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    res.setHeader('Cache-Control', PRODUCT_PAGE_ERROR_CACHE_CONTROL);
+    return res.status(405).send('Método no permitido');
+  }
   const id = clean(searchParams(req).get('id'));
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
 

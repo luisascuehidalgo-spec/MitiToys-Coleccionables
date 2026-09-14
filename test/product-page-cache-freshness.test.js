@@ -11,3 +11,8 @@ test('product pages keep commercial price and stock fresh without serving stale 
   assert.doesNotMatch(source, /stale-while-revalidate/);
   assert.match(source, /PRODUCT_PAGE_CACHE_CONTROL/);
 });
+
+test('product page rejects unsupported methods with an explicit non-cacheable contract', () => {
+  assert.match(source, /PRODUCT_PAGE_ERROR_CACHE_CONTROL = 'private, no-store, max-age=0'/);
+  assert.match(source, /if \(req\.method !== 'GET'\) \{[\s\S]*res\.setHeader\('Allow', 'GET'\);[\s\S]*res\.setHeader\('Cache-Control', PRODUCT_PAGE_ERROR_CACHE_CONTROL\);[\s\S]*status\(405\)/);
+});
