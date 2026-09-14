@@ -30,6 +30,14 @@
       ]
     },
     {
+      "source": "/sitemap.xml",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300" },
+        { "key": "CDN-Cache-Control", "value": "public, s-maxage=900, stale-while-revalidate=3600" },
+        { "key": "Vercel-CDN-Cache-Control", "value": "public, s-maxage=900, stale-while-revalidate=3600" }
+      ]
+    },
+    {
       "source": "/catalogo-dinamico.js",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
