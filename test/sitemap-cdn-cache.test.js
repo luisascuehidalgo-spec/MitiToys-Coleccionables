@@ -14,9 +14,10 @@ function value(headers, key) {
   return headers.find(header => header.key.toLowerCase() === key.toLowerCase())?.value;
 }
 
-test('sitemap is browser-fresh briefly and cached longer only at CDN layers', () => {
+test('sitemap rewrite explicitly enables CDN caching with bounded freshness', () => {
   const headers = headersFor('/sitemap.xml');
 
+  assert.equal(value(headers, 'x-vercel-enable-rewrite-caching'), '1');
   assert.equal(value(headers, 'Cache-Control'), 'public, max-age=300');
   assert.equal(value(headers, 'CDN-Cache-Control'), 'public, s-maxage=900, stale-while-revalidate=3600');
   assert.equal(value(headers, 'Vercel-CDN-Cache-Control'), 'public, s-maxage=900, stale-while-revalidate=3600');
