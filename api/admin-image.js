@@ -28,12 +28,11 @@ function readBody(req) {
 }
 
 module.exports = async (req, res) => {
-  const query = searchParams(req);
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   if (!verify(req)) return res.status(401).json({ error: 'No autorizado.' });
   try {
     if (req.method === 'GET') {
       configuration();
-      res.setHeader('Cache-Control', 'private, no-store');
       return res.status(200).json({ ready: true });
     }
 
@@ -42,6 +41,7 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === 'POST') {
+      const query = searchParams(req);
       const sql = getDb();
       const productId = clean(query.get('productId'), 50);
       const mime = clean(req.headers['content-type'], 100).split(';')[0].toLowerCase();
@@ -74,6 +74,7 @@ module.exports = async (req, res) => {
       return res.status(201).json({ image: { url, filename, mime_type: mime } });
     }
 
+    res.setHeader('Allow', 'GET, POST, DELETE');
     return res.status(405).json({ error: 'Método no permitido.' });
   } catch (error) {
     console.error('admin image error:', error.status || 'UPLOAD_FAILED');
