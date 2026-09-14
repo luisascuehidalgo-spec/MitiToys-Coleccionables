@@ -23,7 +23,7 @@ function productImagePreload(images) {
   try {
     const url = new URL(String(first));
     if (url.protocol !== 'https:') return '';
-    return `<${url.href}>; rel=preload; as=image`;
+    return `<${url.href}>; rel=preload; as=image; fetchpriority=high`;
   } catch (_) {
     return '';
   }
