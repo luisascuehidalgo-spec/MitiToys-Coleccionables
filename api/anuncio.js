@@ -8,7 +8,10 @@ module.exports = async (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.setHeader('X-Robots-Tag', 'noindex');
-  if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(405).send('Método no permitido.');
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('Allow', 'GET, HEAD');
+    return res.status(405).send('Método no permitido.');
+  }
   try {
     const sql = getDb();
     const cloudProducts = await sql`SELECT id,title,images FROM products WHERE active=true AND jsonb_array_length(images)>0 ORDER BY id`;
