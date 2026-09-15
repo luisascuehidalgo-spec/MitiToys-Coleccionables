@@ -31,8 +31,9 @@ function productImagePreload(images) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+  const isHead = req.method === 'HEAD';
+  if (req.method !== 'GET' && !isHead) {
+    res.setHeader('Allow', 'GET, HEAD');
     res.setHeader('Cache-Control', PRODUCT_PAGE_ERROR_CACHE_CONTROL);
     return res.status(405).send('Método no permitido');
   }
@@ -42,7 +43,7 @@ module.exports = async (req, res) => {
   if (!id) {
     res.setHeader('X-Robots-Tag', 'noindex, follow');
     res.setHeader('Cache-Control', PRODUCT_PAGE_CACHE_CONTROL);
-    return res.status(200).send(template);
+    return isHead ? res.status(200).end() : res.status(200).send(template);
   }
 
   try {
@@ -60,7 +61,7 @@ module.exports = async (req, res) => {
     if (!rows.length) {
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
       res.setHeader('Cache-Control', PRODUCT_PAGE_CACHE_CONTROL);
-      return res.status(404).send(template);
+      return isHead ? res.status(404).end() : res.status(404).send(template);
     }
 
     const product = {
@@ -71,14 +72,15 @@ module.exports = async (req, res) => {
     };
     const preload = productImagePreload(product.images);
     if (preload) res.setHeader('Link', preload);
+    res.setHeader('Cache-Control', PRODUCT_PAGE_CACHE_CONTROL);
+    if (isHead) return res.status(200).end();
     const html = renderProductSeo(template, product)
       .replace('"__MITITOYS_PRODUCT_BOOTSTRAP__"', serializeProductBootstrap(product));
-    res.setHeader('Cache-Control', PRODUCT_PAGE_CACHE_CONTROL);
     return res.status(200).send(html);
   } catch (error) {
     console.error('product-page error:', 'code=' + String(error?.code || error?.name || 'PRODUCT_PAGE_ERROR'));
     res.setHeader('Cache-Control', 'no-store');
-    return res.status(500).send(template);
+    return isHead ? res.status(500).end() : res.status(500).send(template);
   }
 };
 
