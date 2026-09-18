@@ -1,26 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    {
-      "source": "/api/envios",
-      "destination": "/api/envios-gateway"
-    },
-    {
-      "source": "/api/crear-preferencia-carrito",
-      "destination": "/api/checkout-gateway"
-    },
-    {
-      "source": "/sitemap.xml",
-      "destination": "/api/productos?sitemap=1"
-    },
-    {
-      "source": "/producto.html",
-      "destination": "/api/product-page"
-    },
-    {
-      "source": "/anuncio",
-      "destination": "/api/anuncio"
-    }
+    { "source": "/api/envios", "destination": "/api/envios-gateway" },
+    { "source": "/api/crear-preferencia-carrito", "destination": "/api/checkout-gateway" },
+    { "source": "/sitemap.xml", "destination": "/api/productos?sitemap=1" },
+    { "source": "/producto.html", "destination": "/api/product-page" },
+    { "source": "/anuncio", "destination": "/api/anuncio" }
   ],
   "headers": [
     {
@@ -29,34 +14,10 @@
         { "key": "Link", "value": "<https://user30281.na.imgto.link/public/20260906/chatgpt-image-4-sept-2026-05-57-01-p-m-3.avif>; rel=preload; as=image; fetchpriority=high" }
       ]
     },
-    {
-      "source": "/catalogo-dinamico.js",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, max-age=0, must-revalidate" }
-      ]
-    },
-    {
-      "source": "/catalogo.css",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" }
-      ]
-    },
-    {
-      "source": "/analytics.js",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" }
-      ]
-    },
-    {
-      "source": "/carrito.js",
-      "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "public, max-age=0, must-revalidate" }
-      ]
-    },
+    { "source": "/catalogo-dinamico.js", "headers": [ { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }, { "key": "Vercel-CDN-Cache-Control", "value": "public, max-age=0, must-revalidate" } ] },
+    { "source": "/catalogo.css", "headers": [ { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }, { "key": "Vercel-CDN-Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" } ] },
+    { "source": "/analytics.js", "headers": [ { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }, { "key": "Vercel-CDN-Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" } ] },
+    { "source": "/carrito.js", "headers": [ { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }, { "key": "Vercel-CDN-Cache-Control", "value": "public, max-age=0, must-revalidate" } ] },
     {
       "source": "/(.*)",
       "headers": [
@@ -65,118 +26,26 @@
         { "key": "Content-Security-Policy", "value": "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
-        { "key": "Strict-Transport-Security", "value": "max-age=31536000" }
+        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" }
       ]
     },
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }
-      ]
-    },
-    {
-      "source": "/api/crear-preferencia-carrito",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "CDN-Cache-Control", "value": "no-store" },
-        { "key": "Vercel-CDN-Cache-Control", "value": "no-store" }
-      ]
-    },
-    {
-      "source": "/seguimiento.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
-        { "key": "Referrer-Policy", "value": "no-referrer" }
-      ]
-    },
-    {
-      "source": "/pedido.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
-        { "key": "Referrer-Policy", "value": "no-referrer" }
-      ]
-    },
-    {
-      "source": "/carrito.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
-        { "key": "Referrer-Policy", "value": "no-referrer" }
-      ]
-    },
-    {
-      "source": "/checkout.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
-        { "key": "Referrer-Policy", "value": "no-referrer" }
-      ]
-    },
-    {
-      "source": "/opinar.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
-        { "key": "Referrer-Policy", "value": "no-referrer" }
-      ]
-    },
-    {
-      "source": "/admin.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
-        { "key": "Referrer-Policy", "value": "no-referrer" }
-      ]
-    },
-    {
-      "source": "/admin-envios.html",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" },
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
-        { "key": "Referrer-Policy", "value": "no-referrer" }
-      ]
-    },
-    {
-      "source": "/api/admin",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
-    },
-    {
-      "source": "/api/admin-auth",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
-    },
-    {
-      "source": "/api/admin-product",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
-    },
-    {
-      "source": "/api/admin-shipping",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
-    },
-    {
-      "source": "/api/admin-image",
-      "headers": [
-        { "key": "Cache-Control", "value": "private, no-store, max-age=0" }
-      ]
-    }
+    { "source": "/api/(.*)", "headers": [ { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" } ] },
+    { "source": "/api/crear-preferencia-carrito", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" }, { "key": "CDN-Cache-Control", "value": "no-store" }, { "key": "Vercel-CDN-Cache-Control", "value": "no-store" } ] },
+    { "source": "/seguimiento.html", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }, { "key": "Referrer-Policy", "value": "no-referrer" } ] },
+    { "source": "/pedido.html", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }, { "key": "Referrer-Policy", "value": "no-referrer" } ] },
+    { "source": "/carrito.html", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }, { "key": "Referrer-Policy", "value": "no-referrer" } ] },
+    { "source": "/checkout.html", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }, { "key": "Referrer-Policy", "value": "no-referrer" } ] },
+    { "source": "/opinar.html", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }, { "key": "Referrer-Policy", "value": "no-referrer" } ] },
+    { "source": "/admin.html", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }, { "key": "Referrer-Policy", "value": "no-referrer" } ] },
+    { "source": "/admin-envios.html", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" }, { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }, { "key": "Referrer-Policy", "value": "no-referrer" } ] },
+    { "source": "/api/admin", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" } ] },
+    { "source": "/api/admin-auth", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" } ] },
+    { "source": "/api/admin-product", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" } ] },
+    { "source": "/api/admin-shipping", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" } ] },
+    { "source": "/api/admin-image", "headers": [ { "key": "Cache-Control", "value": "private, no-store, max-age=0" } ] }
   ],
   "crons": [
-    {
-      "path": "/api/envios?action=automation",
-      "schedule": "0 * * * *"
-    },
-    {
-      "path": "/api/cleanup-shipping-quotes",
-      "schedule": "17 5 * * *"
-    }
+    { "path": "/api/envios?action=automation", "schedule": "0 * * * *" },
+    { "path": "/api/cleanup-shipping-quotes", "schedule": "17 5 * * *" }
   ]
 }
