@@ -5,7 +5,8 @@ const {
   ORDER_STATUS_LOCK_MINUTES,
   orderStatusRateKey,
   orderStatusBlocked,
-  recordOrderStatusFailure
+  recordOrderStatusFailure,
+  clearOrderStatusFailures
 } = require('../lib/order-status-rate-limit');
 
 function firstHeader(value) {
@@ -99,6 +100,7 @@ module.exports = async (req, res) => {
       return res.status(404).json({ error: 'No encontramos un pedido que coincida con ese número y email.' });
     }
 
+    await clearOrderStatusFailures(sql, rateKey);
     const order = rows[0];
     order.status = publicOrderStatus(order);
     order.payment_url = safePendingPaymentUrl(order);
