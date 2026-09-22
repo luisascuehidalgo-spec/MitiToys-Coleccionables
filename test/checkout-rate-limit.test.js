@@ -70,7 +70,7 @@ test('public checkout route applies both tiers before the original handler', () 
     destination: '/api/checkout-gateway'
   });
   assert.match(gatewaySource, /consumeCheckoutAttempt\(db, clientHash\)/);
-  assert.match(gatewaySource, /consumeCheckoutAttempt\(db, ipHash, CHECKOUT_IP_MAX_ATTEMPTS\)/);
+  assert.match(gatewaySource, /consumeCheckoutAttempt\(\s*db,\s*ipHash,\s*CHECKOUT_IP_MAX_ATTEMPTS\s*\)/);
   assert.match(gatewaySource, /res\.status\(429\)/);
   assert.match(gatewaySource, /Retry-After/);
   assert.match(gatewaySource, /return checkoutHandler\(req, res\)/);
