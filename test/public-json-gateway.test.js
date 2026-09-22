@@ -26,10 +26,10 @@ test('public state-changing gateways accept JSON including charset and reject si
   }
 });
 
-test('checkout rejects non-JSON before consuming the IP rate limit', () => {
+test('checkout rejects non-JSON before consuming either checkout rate limit', () => {
   const guard = checkoutSource.indexOf('if (!isJsonRequest(req))');
-  const consume = checkoutSource.indexOf('consumeCheckoutAttempt(getDb(), ipHash)');
-  assert.ok(guard >= 0 && consume >= 0 && guard < consume);
+  const firstConsume = checkoutSource.indexOf('consumeCheckoutAttempt(');
+  assert.ok(guard >= 0 && firstConsume >= 0 && guard < firstConsume);
   assert.match(checkoutSource, /status\(415\)/);
   assert.match(checkoutSource, /CHECKOUT_JSON_REQUIRED/);
 });
