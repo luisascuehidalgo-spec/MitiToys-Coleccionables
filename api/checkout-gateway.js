@@ -1,8 +1,13 @@
 const { getDb } = require('../lib/db');
 const checkoutHandler = require('./crear-preferencia-carrito');
 const {
+  CHECKOUT_IP_MAX_ATTEMPTS,
   CHECKOUT_LOCK_MINUTES,
   checkoutRateKey,
+  checkoutClientRateKey,
+  checkoutClientToken,
+  newCheckoutClientToken,
+  checkoutClientCookie,
   consumeCheckoutAttempt
 } = require('../lib/checkout-rate-limit');
 
@@ -67,10 +72,22 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const ipHash = checkoutRateKey(req, process.env.ADMIN_SESSION_SECRET);
+    const secret = process.env.ADMIN_SESSION_SECRET;
+    const ipHash = checkoutRateKey(req, secret);
     if (ipHash) {
-      const limit = await consumeCheckoutAttempt(getDb(), ipHash);
-      if (limit.blocked) {
+      let clientToken = checkoutClientToken(req);
+      if (!clientToken) {
+        clientToken = newCheckoutClientToken();
+        res.setHeader('Set-Cookie', checkoutClientCookie(clientToken));
+      }
+
+      const db = getDb();
+      const clientHash = checkoutClientRateKey(req, secret, clientToken);
+      const [clientLimit, ipLimit] = await Promise.all([
+        consumeCheckoutAttempt(db, clientHash),
+        consumeCheckoutAttempt(db, ipHash, CHECKOUT_IP_MAX_ATTEMPTS)
+      ]);
+      if (clientLimit.blocked || ipLimit.blocked) {
         res.setHeader('Retry-After', String(CHECKOUT_LOCK_MINUTES * 60));
         return res.status(429).json({
           code: 'CHECKOUT_RATE_LIMITED',
