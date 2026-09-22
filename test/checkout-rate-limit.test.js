@@ -35,6 +35,25 @@ test('checkout limiter uses a bounded conservative window', () => {
   assert.equal(CHECKOUT_LOCK_MINUTES, 10);
 });
 
+test('shared-IP clients currently collide on the same checkout budget', () => {
+  const secret = 'test-secret';
+  const natIp = '203.0.113.44';
+  const clientA = { headers: { 'x-forwarded-for': natIp }, body: { email: 'a@example.test', cart: [{ id: 1 }] } };
+  const clientB = { headers: { 'x-forwarded-for': natIp }, body: { email: 'b@example.test', cart: [{ id: 2 }] } };
+
+  assert.equal(checkoutRateKey(clientA, secret), checkoutRateKey(clientB, secret));
+  assert.equal(CHECKOUT_MAX_ATTEMPTS, 12);
+});
+
+test('client-controlled checkout fields cannot rotate the current backstop key', () => {
+  const secret = 'test-secret';
+  const ip = '203.0.113.45';
+  const first = { headers: { 'x-forwarded-for': ip }, body: { email: 'first@example.test', cart: [{ id: 10 }] } };
+  const rotated = { headers: { 'x-forwarded-for': ip }, body: { email: 'rotated@example.test', cart: [{ id: 999 }] } };
+
+  assert.equal(checkoutRateKey(first, secret), checkoutRateKey(rotated, secret));
+});
+
 test('public checkout route is gated before the original handler', () => {
   const rewrite = vercel.rewrites.find(item => item.source === '/api/crear-preferencia-carrito');
   assert.deepEqual(rewrite, {
