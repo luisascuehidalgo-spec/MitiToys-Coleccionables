@@ -176,7 +176,11 @@
       searchAnalyticsTimer = setTimeout(() => {
         const settledQuery = search.value.trim();
         if (settledQuery.length < 2 || settledQuery === lastTrackedSearch) return;
-        window.MitiToysAnalytics?.track('catalog_search', { query: settledQuery });
+        const resultsCount = [...grid.querySelectorAll('.card')].filter(card => !card.hidden).length;
+        window.MitiToysAnalytics?.track('catalog_search', {
+          query_length: settledQuery.length,
+          results_count: resultsCount
+        });
         lastTrackedSearch = settledQuery;
       }, 600);
     });
