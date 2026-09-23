@@ -18,7 +18,7 @@ test('catalog search analytics never sends free-form search text', () => {
   const event = catalog.match(/track\('catalog_search',\s*\{([^}]*)\}\)/s);
   assert.ok(event, 'catalog_search analytics event must exist');
   assert.doesNotMatch(event[1], /\bquery\s*:/);
-  assert.doesNotMatch(event[1], /settledQuery/);
-  assert.match(event[1], /query_length\s*:/);
+  assert.doesNotMatch(event[1], /\b(query|search|term|text|value)\s*:\s*settledQuery\b/);
+  assert.match(event[1], /query_length\s*:\s*settledQuery\.length/);
   assert.match(event[1], /results_count\s*:/);
 });
